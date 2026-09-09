@@ -115,6 +115,24 @@ test("hafp_view and hafp_floor are read from a navigation hash", () => {
   reset();
 });
 
+test("the same named view can be applied again", () => {
+  const applied = [];
+  const card = makeCard({
+    _activeFloorId: "ground",
+    _modelViews: { ground: { kitchen: { position: [1, 2, 3], target: [0, 0, 0], zoom: 1 } } },
+    _modelViewer: { camera: {}, controls: {} },
+    _animateModelCameraView: (view) => {
+      applied.push(view);
+      return true;
+    },
+  });
+  location._hash = "#hafp_view=kitchen";
+  assert.equal(card._applyRequestedModelView(), true);
+  assert.equal(card._applyRequestedModelView(), true);
+  assert.equal(applied.length, 2);
+  reset();
+});
+
 test("hafp_floor selects a floor from the URL", () => {
   const card = makeCard();
   location._search = "?hafp_floor=first&hafp_view=living_room";

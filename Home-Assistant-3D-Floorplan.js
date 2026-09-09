@@ -3449,7 +3449,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       this._activeRequestedModelView = "";
       return false;
     }
-    if (name === this._activeRequestedModelView) return false;
     const view = this._modelViews?.[this._activeFloorId || "default"]?.[name];
     if (!view || !this._modelViewer?.camera || !this._modelViewer?.controls) return false;
     this._activeRequestedModelView = name;
