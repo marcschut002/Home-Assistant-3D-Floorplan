@@ -141,7 +141,7 @@ Navigate to the card's dashboard view with `hafp_view` in the URL:
 ```yaml
 tap_action:
   action: navigate
-  navigation_path: /lovelace/floorplan?hafp_view=kitchen
+  navigation_path: "#hafp_view=kitchen"
 ```
 
 Combine both parameters to select a floor and a view:
@@ -149,10 +149,11 @@ Combine both parameters to select a floor and a view:
 ```yaml
 tap_action:
   action: navigate
-  navigation_path: /lovelace/floorplan?hafp_floor=first&hafp_view=living_room
+  navigation_path: "#hafp_floor=first&hafp_view=living_room"
 ```
 
 `hafp_floor` must match the floor `id`, not its display name.
+The hash format keeps the current Lovelace page in place and avoids a route refresh.
 
 For multiple floors, put `views` inside the relevant floor. The named view is
 applied after the model loads and can also be changed while the card is open.

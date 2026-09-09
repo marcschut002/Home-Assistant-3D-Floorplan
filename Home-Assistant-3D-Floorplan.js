@@ -102,6 +102,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       if (!document.hidden) this._requestRender();
     };
     this._boundLocationChanged = () => this._applyRequestedNavigation();
+    this._boundHashChanged = () => this._applyRequestedNavigation();
   }
 
   setConfig(config) {
@@ -216,6 +217,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   connectedCallback() {
     window.addEventListener("keydown", this._boundKeydown, { capture: true });
     window.addEventListener("location-changed", this._boundLocationChanged);
+    window.addEventListener("hashchange", this._boundHashChanged);
     document.addEventListener("visibilitychange", this._boundVisibilityChange);
     this._queueModelViewerRecovery();
   }
@@ -223,6 +225,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   disconnectedCallback() {
     window.removeEventListener("keydown", this._boundKeydown, { capture: true });
     window.removeEventListener("location-changed", this._boundLocationChanged);
+    window.removeEventListener("hashchange", this._boundHashChanged);
     document.removeEventListener("visibilitychange", this._boundVisibilityChange);
     window.clearTimeout(this._modelRecoveryTimer);
     this._disposeModelViewer();
@@ -3413,18 +3416,21 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _requestedModelViewName() {
-    try {
-      return new URLSearchParams(window.location?.search || "").get("hafp_view")?.trim() || "";
-    } catch (_) {
-      return "";
-    }
+    return this._requestedNavigationParams().get("hafp_view")?.trim() || "";
   }
 
   _requestedModelFloorId() {
+    return this._requestedNavigationParams().get("hafp_floor")?.trim() || "";
+  }
+
+  _requestedNavigationParams() {
     try {
-      return new URLSearchParams(window.location?.search || "").get("hafp_floor")?.trim() || "";
+      const search = window.location?.search || "";
+      if (search.includes("hafp_")) return new URLSearchParams(search);
+      const hash = String(window.location?.hash || "").replace(/^#/, "");
+      return hash.startsWith("hafp_") ? new URLSearchParams(hash) : new URLSearchParams();
     } catch (_) {
-      return "";
+      return new URLSearchParams();
     }
   }
 

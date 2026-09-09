@@ -107,6 +107,14 @@ test("hafp_view selects a named camera view from the URL", () => {
   reset();
 });
 
+test("hafp_view and hafp_floor are read from a navigation hash", () => {
+  const card = makeCard();
+  location._hash = "#hafp_floor=first&hafp_view=living_room";
+  assert.equal(card._requestedModelFloorId(), "first");
+  assert.equal(card._requestedModelViewName(), "living_room");
+  reset();
+});
+
 test("hafp_floor selects a floor from the URL", () => {
   const card = makeCard();
   location._search = "?hafp_floor=first&hafp_view=living_room";
