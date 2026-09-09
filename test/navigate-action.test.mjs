@@ -25,6 +25,7 @@ globalThis.document = { createElement: (tag) => ({ tag }) };
 const hashChanges = [];
 const location = {
   _hash: "",
+  _search: "",
   get hash() { return this._hash; },
   set hash(value) {
     const next = value === "" ? "" : value.startsWith("#") ? value : `#${value}`;
@@ -32,6 +33,7 @@ const location = {
     this._hash = next;
     hashChanges.push(next);
   },
+  get search() { return this._search; },
 };
 
 globalThis.window = {
@@ -65,6 +67,7 @@ function reset() {
   pushed.length = 0;
   hashChanges.length = 0;
   location._hash = "";
+  location._search = "";
 }
 
 const locationChanged = () => fired.filter((e) => e.type === "location-changed");
@@ -85,6 +88,35 @@ test("navigate survives config normalisation", () => {
   const card = makeCard();
   assert.equal(card._normalizeMarkerAction("navigate", "tap"), "navigate");
   assert.equal(card._normalizeMarkerAction("navigate", "hold"), "navigate");
+});
+
+test("named camera views are normalised and invalid views are ignored", () => {
+  const card = makeCard();
+  const views = card._normalizeModelViews({
+    kitchen: { position: [1, 2, 3], target: [0, 0, 0], zoom: 1 },
+    invalid: { position: [1, 2], target: [0, 0, 0] },
+  });
+  assert.deepEqual(views.kitchen.position, [1, 2, 3]);
+  assert.equal(views.invalid, undefined);
+});
+
+test("hafp_view selects a named camera view from the URL", () => {
+  const card = makeCard();
+  location._search = "?hafp_view=living_room";
+  assert.equal(card._requestedModelViewName(), "living_room");
+  reset();
+});
+
+test("hafp_floor selects a floor from the URL", () => {
+  const card = makeCard();
+  location._search = "?hafp_floor=first&hafp_view=living_room";
+  assert.equal(card._requestedModelFloorId(), "first");
+  reset();
+});
+
+test("navigation buttons can be hidden", () => {
+  const card = makeCard({ _config: { show_navigation_buttons: false } });
+  assert.equal(card._modelCompassTemplate(), "");
 });
 
 test("unknown actions are still rejected", () => {

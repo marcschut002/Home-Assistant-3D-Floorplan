@@ -10,6 +10,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       model: "/local/floorplans/home.glb",
       view_mode: "3d",
       default_view: null,
+      show_navigation_buttons: true,
       offline_states: ["unavailable", "unknown"],
       markers: [],
       floors: [],
@@ -86,6 +87,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._modelRenderToken = 0;
     this._modelCameraState = null;
     this._modelDefaultViews = {};
+    this._modelViews = {};
+    this._activeRequestedModelView = "";
     this._modelViewAnimation = 0;
     this._modelLoadingUrl = "";
     this._modelLoadFailedUrl = "";
@@ -96,6 +99,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       // Resume with a fresh render when the tab becomes visible again.
       if (!document.hidden) this._requestRender();
     };
+    this._boundLocationChanged = () => this._applyRequestedNavigation();
   }
 
   setConfig(config) {
@@ -113,6 +117,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       interactive_objects: [],
       view_mode: "3d",
       default_view: null,
+      views: {},
+      show_navigation_buttons: true,
       model: "",
       allow_edit: true,
       marker_tap_action: "auto",
@@ -158,10 +164,15 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ...config,
     };
     this._floors = this._normalizedFloors(this._config);
-    if (!this._floors.some((floor) => floor.id === this._activeFloorId)) {
-      this._activeFloorId = this._floors[0]?.id || "default";
-    }
+    const requestedFloorId = this._requestedModelFloorId();
+    this._activeFloorId = this._floors.some((floor) => floor.id === requestedFloorId)
+      ? requestedFloorId
+      : this._floors.some((floor) => floor.id === this._activeFloorId)
+        ? this._activeFloorId
+        : this._floors[0]?.id || "default";
     this._modelDefaultViews = this._mergedModelDefaultViews(this._configModelDefaultViews(), this._loadModelDefaultViews());
+    this._modelViews = this._configModelViews();
+    this._activeRequestedModelView = "";
     this._display = this._normalizedDisplay({
       markerSize: this._config.marker_size,
       showLabels: this._config.show_labels,
@@ -202,12 +213,14 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   connectedCallback() {
     window.addEventListener("keydown", this._boundKeydown, { capture: true });
+    window.addEventListener("location-changed", this._boundLocationChanged);
     document.addEventListener("visibilitychange", this._boundVisibilityChange);
     this._queueModelViewerRecovery();
   }
 
   disconnectedCallback() {
     window.removeEventListener("keydown", this._boundKeydown, { capture: true });
+    window.removeEventListener("location-changed", this._boundLocationChanged);
     document.removeEventListener("visibilitychange", this._boundVisibilityChange);
     window.clearTimeout(this._modelRecoveryTimer);
     this._disposeModelViewer();
@@ -594,6 +607,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         image: floor.image || "",
         model: floor.model || config.model || "",
         default_view: floor.default_view || floor.defaultView || null,
+        views: floor.views || {},
         markers: Array.isArray(floor.markers) ? floor.markers : [],
         brightness_zones: Array.isArray(floor.brightness_zones) ? floor.brightness_zones : [],
         animations: Array.isArray(floor.animations) ? floor.animations : [],
@@ -1088,6 +1102,29 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     }, {});
   }
 
+  _configModelViews() {
+    if (!this._hasMultipleFloors()) {
+      return {
+        [this._activeFloorId || "default"]: this._normalizeModelViews(this._config.views || {}),
+      };
+    }
+
+    return this._floors.reduce((result, floor) => {
+      result[floor.id] = this._normalizeModelViews(floor.views);
+      return result;
+    }, {});
+  }
+
+  _normalizeModelViews(views) {
+    if (!views || typeof views !== "object" || Array.isArray(views)) return {};
+    return Object.entries(views).reduce((result, [name, view]) => {
+      const normalized = this._normalizeModelView(view);
+      const key = String(name).trim();
+      if (key && normalized) result[key] = normalized;
+      return result;
+    }, {});
+  }
+
   _mergedModelDefaultViews(configViews, savedViews) {
     const result = {};
     for (const floor of this._floors) {
@@ -1526,18 +1563,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-floor]").forEach((element) => {
       element.addEventListener("change", (event) => {
         const floorId = event.currentTarget.value;
-        if (!this._floors.some((floor) => floor.id === floorId)) return;
-        this._floorMarkers[this._activeFloorId] = this._markers;
-        this._floorZones[this._activeFloorId] = this._zones;
-        this._activeFloorId = floorId;
-        this._markers = this._floorMarkers[floorId] || {};
-        this._zones = this._floorZones[floorId] || {};
-        this._activeZoneId = "";
-        this._zoneDrawing = false;
-        this._selectedMarkers.clear();
-        this._selectionBox = null;
-        this._mapScroll = { left: 0, top: 0, leftRatio: 0, topRatio: 0 };
-        this._render();
+        this._setActiveFloor(floorId);
       });
     });
 
@@ -2570,6 +2596,23 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._restoreMapAlertScroll();
   }
 
+  _setActiveFloor(floorId) {
+    if (!floorId || floorId === this._activeFloorId || !this._floors.some((floor) => floor.id === floorId)) return false;
+    this._floorMarkers[this._activeFloorId] = this._markers;
+    this._floorZones[this._activeFloorId] = this._zones;
+    this._activeFloorId = floorId;
+    this._markers = this._floorMarkers[floorId] || {};
+    this._zones = this._floorZones[floorId] || {};
+    this._activeZoneId = "";
+    this._zoneDrawing = false;
+    this._selectedMarkers.clear();
+    this._selectionBox = null;
+    this._activeRequestedModelView = "";
+    this._mapScroll = { left: 0, top: 0, leftRatio: 0, topRatio: 0 };
+    this._render();
+    return true;
+  }
+
   _jumpToMarker(floorId, markerKey) {
     if (!floorId || !markerKey || !this._floors.some((floor) => floor.id === floorId)) return;
     const offlineFocusId = this._offlineFocusId(floorId, markerKey);
@@ -2582,17 +2625,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       return;
     }
 
-    this._floorMarkers[this._activeFloorId] = this._markers;
-    this._floorZones[this._activeFloorId] = this._zones;
-    this._activeFloorId = floorId;
-    this._markers = this._floorMarkers[floorId] || {};
-    this._zones = this._floorZones[floorId] || {};
-    this._activeZoneId = "";
-    this._zoneDrawing = false;
-    this._selectedMarkers.clear();
-    this._selectionBox = null;
     this._pendingMarkerFocus = { key: markerKey, options: focusOptions };
-    this._render();
+    this._setActiveFloor(floorId);
   }
 
   _applyZoomToDom() {
@@ -3164,6 +3198,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _setModelView(viewName) {
     const viewer = this._modelViewer;
     if (!viewer?.THREE || !viewer?.camera || !viewer?.controls) return;
+    const namedView = this._modelViews?.[this._activeFloorId || "default"]?.[viewName];
+    if (namedView) {
+      this._animateModelCameraView(namedView, viewer.camera, viewer.controls);
+      return;
+    }
     if (viewName === "default") {
       const view = this._modelDefaultViews?.[this._activeFloorId || "default"];
       if (view) this._animateModelCameraView(view, viewer.camera, viewer.controls);
@@ -3182,6 +3221,44 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       near: camera.near,
       far: camera.far,
     }, camera, controls);
+  }
+
+  _requestedModelViewName() {
+    try {
+      return new URLSearchParams(window.location?.search || "").get("hafp_view")?.trim() || "";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  _requestedModelFloorId() {
+    try {
+      return new URLSearchParams(window.location?.search || "").get("hafp_floor")?.trim() || "";
+    } catch (_) {
+      return "";
+    }
+  }
+
+  _applyRequestedNavigation() {
+    const floorId = this._requestedModelFloorId();
+    if (floorId && floorId !== this._activeFloorId && this._floors.some((floor) => floor.id === floorId)) {
+      this._setActiveFloor(floorId);
+      return true;
+    }
+    return this._applyRequestedModelView();
+  }
+
+  _applyRequestedModelView() {
+    const name = this._requestedModelViewName();
+    if (!name) {
+      this._activeRequestedModelView = "";
+      return false;
+    }
+    if (name === this._activeRequestedModelView) return false;
+    const view = this._modelViews?.[this._activeFloorId || "default"]?.[name];
+    if (!view || !this._modelViewer?.camera || !this._modelViewer?.controls) return false;
+    this._activeRequestedModelView = name;
+    return this._animateModelCameraView(view, this._modelViewer.camera, this._modelViewer.controls);
   }
 
   _modelViewDirection(viewName, THREE) {
@@ -4675,6 +4752,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _modelCompassTemplate() {
+    if (this._config.show_navigation_buttons === false) return "";
     const hasDefaultView = Boolean(this._modelDefaultViews?.[this._activeFloorId || "default"]);
     return `
       <div class="model-compass" aria-label="3D view compass">
@@ -4734,6 +4812,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const performanceLines = this._yamlPerformanceSettings();
     const ambientLines = this._yamlAmbientDarkness();
     const defaultViewLines = this._yamlDefaultView(this._modelDefaultViews?.[this._activeFloorId || "default"], "");
+    const viewLines = this._yamlModelViews(this._modelViews?.[this._activeFloorId || "default"], "");
     if (this._hasMultipleFloors()) {
       return [
         ...performanceLines,
@@ -4749,6 +4828,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
             ...(floor.image ? [`    image: ${floor.image}`] : []),
             ...(floor.model ? [`    model: ${floor.model}`] : []),
             ...floorDefaultView,
+            ...this._yamlModelViews(this._modelViews?.[floor.id], "    "),
             ...(markers.length
               ? [
                   "    markers:",
@@ -4814,11 +4894,12 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const markers = this._yamlMarkersForFloor(this._activeFloorId, rowByKey);
     const zones = this._yamlZonesForFloor(this._activeFloorId);
 
-    if (!markers.length && !zones.length && !defaultViewLines.length) return "markers: []";
+    if (!markers.length && !zones.length && !defaultViewLines.length && !viewLines.length) return "markers: []";
 
     return [
       ...performanceLines,
       ...defaultViewLines,
+      ...viewLines,
       ...(markers.length
         ? [
             "markers:",
@@ -4930,6 +5011,21 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       `${indent}  position: ${formatArray(normalized.position)}`,
       `${indent}  target: ${formatArray(normalized.target)}`,
       ...(Number.isFinite(normalized.zoom) ? [`${indent}  zoom: ${Number(normalized.zoom).toFixed(4)}`] : []),
+    ];
+  }
+
+  _yamlModelViews(views, indent = "") {
+    const entries = Object.entries(this._normalizeModelViews(views));
+    if (!entries.length) return [];
+    const formatArray = (values) => `[${values.map((value) => Number(value).toFixed(4)).join(", ")}]`;
+    return [
+      `${indent}views:`,
+      ...entries.flatMap(([name, view]) => [
+        `${indent}  ${name}:`,
+        `${indent}    position: ${formatArray(view.position)}`,
+        `${indent}    target: ${formatArray(view.target)}`,
+        ...(Number.isFinite(view.zoom) ? [`${indent}    zoom: ${Number(view.zoom).toFixed(4)}`] : []),
+      ]),
     ];
   }
 
@@ -5634,6 +5730,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           disposed = true;
         },
       };
+      this._applyRequestedModelView();
       this._applyZoneDrawingState();
       this._refresh3DZoneOverlay();
       animate();
@@ -11403,6 +11500,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       "model_background",
       "view_mode",
       "allow_edit",
+      "show_navigation_buttons",
       "show_labels",
       "show_entity_state",
       "marker_size",
@@ -11433,6 +11531,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       "orbit_controls_urls",
       "animations",
       "interactive_objects",
+      "views",
     ];
 
     directKeys.forEach((key) => {
@@ -11461,6 +11560,10 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
     if (expanded.default_view !== undefined) {
       next.default_view = expanded.default_view;
       applied.push("default_view");
+    }
+    if (expanded.views !== undefined) {
+      next.views = expanded.views && typeof expanded.views === "object" ? expanded.views : {};
+      applied.push("views");
     }
     if (expanded.floors !== undefined) {
       next.floors = Array.isArray(expanded.floors) ? expanded.floors : [];

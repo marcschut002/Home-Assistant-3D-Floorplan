@@ -29,8 +29,12 @@ type: custom:home-assistant-3d-floorplan
 title: 3D Floorplan
 model: /local/floorplans/home.glb
 view_mode: "3d"
+show_navigation_buttons: true
 markers: []
 ```
+
+Set `show_navigation_buttons: false` to hide the 3D navigation buttons (`N`,
+`W`, `E`, `S`, `Top`, `Home`, `Save Home`, and `Clear`).
 
 ## Coordinate System
 
@@ -115,6 +119,43 @@ So for the example above: values below 18 are blue, 18–21.9 are blue, 22–25.
 `color_thresholds` works in both 2D (floorplan image) and 3D model view, and accepts any valid CSS color (`#hex`, `rgb()`, named colors). When the entity is offline or unavailable, the standard red offline styling takes precedence.
 
 In Edit Mode, select a numeric sensor marker and use **Color thresholds** in the marker settings panel to add, edit, or remove threshold rows.
+
+## Named Camera Views
+
+Define additional 3D camera views next to `default_view`. A view name can then be
+opened from another Lovelace card with a normal Home Assistant `navigate` action:
+
+```yaml
+views:
+  kitchen:
+    position: [6.2500, 4.5000, 8.7500]
+    target: [0.0000, 0.8000, 0.0000]
+    zoom: 1.0000
+  living_room:
+    position: [-4.0000, 3.5000, 6.0000]
+    target: [1.0000, 0.8000, 0.0000]
+```
+
+Navigate to the card's dashboard view with `hafp_view` in the URL:
+
+```yaml
+tap_action:
+  action: navigate
+  navigation_path: /lovelace/floorplan?hafp_view=kitchen
+```
+
+Combine both parameters to select a floor and a view:
+
+```yaml
+tap_action:
+  action: navigate
+  navigation_path: /lovelace/floorplan?hafp_floor=first&hafp_view=living_room
+```
+
+`hafp_floor` must match the floor `id`, not its display name.
+
+For multiple floors, put `views` inside the relevant floor. The named view is
+applied after the model loads and can also be changed while the card is open.
 
 ## Edit Mode
 
