@@ -133,6 +133,13 @@ test("_zoneFloorLevel raises the floor plane by the configured offset", () => {
   assert.equal(card._zoneFloorLevel({ floorOffset: 0 }), 0);
 });
 
+test("_offsetZonePoints anchors wall/ceiling/outline geometry to the zone floor level", () => {
+  const card = makeCard();
+  const points = card._offsetZonePoints([{ x: 1, y: 0, z: 2 }], 0.025, 2.5);
+  assert.equal(points[0].y, 2.525, "vertical axis gets floor level plus the small anti z-fighting lift");
+  assert.equal(points[0].x, 1, "floor-plane axes stay untouched");
+});
+
 test("the same named view can be applied again", () => {
   const applied = [];
   const card = makeCard({

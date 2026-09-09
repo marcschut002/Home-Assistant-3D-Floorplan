@@ -6521,7 +6521,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _zoneOutline(THREE, zone) {
     if (this._mode !== "edit") return null;
-    const points = this._offsetZonePoints(zone.points, 0.05);
+    const points = this._offsetZonePoints(zone.points, 0.05, this._zoneFloorLevel(zone));
     const vertices = [...points, points[0]].flatMap((point) => [point.x, point.y, point.z]);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
@@ -6532,7 +6532,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _zoneWallWashMeshes(THREE, zone, brightness, color) {
-    const basePoints = this._offsetZonePoints(zone.points);
+    const basePoints = this._offsetZonePoints(zone.points, 0.025, this._zoneFloorLevel(zone));
     if (basePoints.length < 2) return [];
     const displayHeight = Math.max(0.01, Math.abs(this._zoneHeight(zone)));
     const modelHeight = this._displayToModelVector(this._displayHeightVector(displayHeight));
@@ -6576,7 +6576,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
    *  are bright near the light and naturally dark at the far end, no manual grid subdivision needed. */
   _nearbyWallGlowMeshes(THREE, zone, marker, lightRadius, color, brightness, lightType, heightFraction = 0.8) {
     if (brightness < 0.01) return [];
-    const basePoints = this._offsetZonePoints(zone.points);
+    const basePoints = this._offsetZonePoints(zone.points, 0.025, this._zoneFloorLevel(zone));
     if (basePoints.length < 2) return [];
     const displayHeight = Math.max(0.01, Math.abs(this._zoneHeight(zone)));
     const modelHeight = this._displayToModelVector(this._displayHeightVector(displayHeight));
@@ -6792,7 +6792,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _zoneWallShadeMeshes(THREE, zone, darkness) {
     const opacity = Math.max(0, Math.min(0.62, darkness * 0.8));
     if (opacity <= 0.01) return [];
-    const basePoints = this._offsetZonePoints(zone.points);
+    const basePoints = this._offsetZonePoints(zone.points, 0.025, this._zoneFloorLevel(zone));
     if (basePoints.length < 2) return [];
     const displayHeight = Math.max(0.01, Math.abs(this._zoneHeight(zone)));
     const modelHeight = this._displayToModelVector(this._displayHeightVector(displayHeight));
@@ -6835,7 +6835,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const displayHeight = Math.max(0.01, Math.abs(this._zoneHeight(zone)));
     const shadeHeight = Math.max(0, Math.min(displayHeight, this._zoneShadeHeight(zone)));
     const offset = this._displayToModelVector(this._displayHeightVector(shadeHeight));
-    const points = this._offsetZonePoints(zone.points).map((point) => ({
+    const points = this._offsetZonePoints(zone.points, 0.025, this._zoneFloorLevel(zone)).map((point) => ({
       x: point.x + offset.x,
       y: point.y + offset.y,
       z: point.z + offset.z,
@@ -6938,7 +6938,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _zoneCenter(zone) {
-    const points = this._offsetZonePoints(zone.points || [], 0.08);
+    const points = this._offsetZonePoints(zone.points || [], 0.08, this._zoneFloorLevel(zone));
     if (!points.length) return null;
     return points.reduce(
       (center, point) => {
@@ -7062,9 +7062,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     }
   }
 
-  _offsetZonePoints(points, lift = 0.025) {
+  _offsetZonePoints(points, lift = 0.025, floorLevel = 0) {
     const modelVertical = this._coordinateMap()[this._verticalAxis()] || "z";
-    const offset = Number.isFinite(Number(lift)) ? Number(lift) : 0.025;
+    const offset = (Number.isFinite(Number(lift)) ? Number(lift) : 0.025) + (Number(floorLevel) || 0);
     return points.map((point) => ({
       x: Number(point.x) + (modelVertical === "x" ? offset : 0),
       y: Number(point.y) + (modelVertical === "y" ? offset : 0),
