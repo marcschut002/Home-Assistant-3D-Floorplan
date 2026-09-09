@@ -119,6 +119,39 @@ test("navigation buttons can be hidden", () => {
   assert.equal(card._modelCompassTemplate(), "");
 });
 
+test("editor exposes navigation button visibility", () => {
+  const editor = Object.create(Editor.prototype);
+  editor._config = {};
+  const html = editor._checkboxInput("show_navigation_buttons", "Show 3D Navigation Buttons", true);
+  assert.match(html, /data-config-key="show_navigation_buttons"/);
+  assert.match(html, /checked/);
+});
+
+test("view editor renders the camera form and saved views", () => {
+  const card = makeCard({
+    _activeFloorId: "ground",
+    _modelViews: { ground: { kitchen: { position: [1, 2, 3], target: [0, 0, 0], zoom: 1 } } },
+    _modelViewDraft: { name: "", position: [], target: [], zoom: 1 },
+  });
+  const html = card._modelViewToolsTemplate();
+  assert.match(html, /data-view-use-current/);
+  assert.match(html, /data-view-name/);
+  assert.match(html, /data-view-select="kitchen"/);
+});
+
+test("view editor saves a named camera view", () => {
+  const card = makeCard({
+    _activeFloorId: "ground",
+    _modelViews: { ground: {} },
+    _modelViewDraft: { name: "kitchen", position: [1, 2, 3], target: [0, 0, 0], zoom: 1 },
+    _saveModelViews: () => {},
+    _refreshModelViewTools: () => {},
+    _refreshModelCompass: () => {},
+  });
+  card._saveNamedModelView({ querySelector: () => null });
+  assert.deepEqual(card._modelViews.ground.kitchen, { position: [1, 2, 3], target: [0, 0, 0], zoom: 1 });
+});
+
 test("unknown actions are still rejected", () => {
   const card = makeCard();
   assert.equal(card._normalizeMarkerAction("launch-missiles", "tap"), "");

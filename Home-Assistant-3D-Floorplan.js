@@ -10,6 +10,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       model: "/local/floorplans/home.glb",
       view_mode: "3d",
       default_view: null,
+      views: {},
       show_navigation_buttons: true,
       offline_states: ["unavailable", "unknown"],
       markers: [],
@@ -88,6 +89,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._modelCameraState = null;
     this._modelDefaultViews = {};
     this._modelViews = {};
+    this._modelViewDraft = { name: "", position: [], target: [], zoom: 1 };
     this._activeRequestedModelView = "";
     this._modelViewAnimation = 0;
     this._modelLoadingUrl = "";
@@ -171,7 +173,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         ? this._activeFloorId
         : this._floors[0]?.id || "default";
     this._modelDefaultViews = this._mergedModelDefaultViews(this._configModelDefaultViews(), this._loadModelDefaultViews());
-    this._modelViews = this._configModelViews();
+    this._modelViews = this._mergedModelViews(this._configModelViews(), this._loadModelViews());
     this._activeRequestedModelView = "";
     this._display = this._normalizedDisplay({
       markerSize: this._config.marker_size,
@@ -1089,6 +1091,34 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._refreshYamlExport();
   }
 
+  _modelViewsStorageKey() {
+    const path = window.location?.pathname || "dashboard";
+    const cardKey = this._config.storage_key || this._config.title || "home-assistant-3d-floorplan";
+    return `home-assistant-3d-floorplan:model-views${this._coordinateStorageSuffix()}:${path}:${cardKey}`;
+  }
+
+  _loadModelViews() {
+    if (this._config.persist_layout === false) return {};
+    try {
+      const value = localStorage.getItem(this._modelViewsStorageKey());
+      return value ? JSON.parse(value) : {};
+    } catch (error) {
+      console.warn("home-assistant-3d-floorplan: named model views could not be loaded", error);
+      return {};
+    }
+  }
+
+  _saveModelViews() {
+    if (this._config.persist_layout !== false) {
+      try {
+        localStorage.setItem(this._modelViewsStorageKey(), JSON.stringify(this._modelViews));
+      } catch (error) {
+        console.warn("home-assistant-3d-floorplan: named model views could not be saved", error);
+      }
+    }
+    this._refreshYamlExport();
+  }
+
   _configModelDefaultViews() {
     if (!this._hasMultipleFloors()) {
       return {
@@ -1113,6 +1143,17 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       result[floor.id] = this._normalizeModelViews(floor.views);
       return result;
     }, {});
+  }
+
+  _mergedModelViews(configViews, savedViews) {
+    const result = {};
+    for (const floor of this._floors) {
+      result[floor.id] = {
+        ...(configViews?.[floor.id] || {}),
+        ...this._normalizeModelViews(savedViews?.[floor.id]),
+      };
+    }
+    return result;
   }
 
   _normalizeModelViews(views) {
@@ -1357,6 +1398,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
             <div class="sidebar-tabs" role="tablist" aria-label="Edit tools">
               <button type="button" data-sidebar-tab="markers" class="${this._sidebarTab === "markers" ? "active" : ""}">Markers</button>
               <button type="button" data-sidebar-tab="areas" class="${this._sidebarTab === "areas" ? "active" : ""}">Areas</button>
+              <button type="button" data-sidebar-tab="views" class="${this._sidebarTab === "views" ? "active" : ""}">Views</button>
             </div>
             ${
               this._sidebarTab === "areas"
@@ -1371,7 +1413,19 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               </section>
             </div>
             `
-                : `
+                : this._sidebarTab === "views"
+                  ? `
+            <div class="sidebar-tab-panel views-panel">
+              <section class="view-tools">
+                <div class="zone-tools-title">
+                  <strong>Camera Views</strong>
+                  <button type="button" data-view-use-current>Use Current Camera</button>
+                </div>
+                ${this._modelViewToolsTemplate()}
+              </section>
+            </div>
+            `
+                  : `
             <div class="sidebar-tab-panel markers-panel">
               <section class="filters">
                 <button type="button" class="filters-toggle" data-filters-toggle aria-expanded="${this._filtersCollapsed ? "false" : "true"}">
@@ -1576,7 +1630,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
     this.shadowRoot.querySelectorAll("[data-sidebar-tab]").forEach((element) => {
       element.addEventListener("click", (event) => {
-        const tab = event.currentTarget.dataset.sidebarTab === "areas" ? "areas" : "markers";
+        const tab = ["markers", "areas", "views"].includes(event.currentTarget.dataset.sidebarTab)
+          ? event.currentTarget.dataset.sidebarTab
+          : "markers";
         if (this._sidebarTab === tab) return;
         this._sidebarTab = tab;
         if (tab !== "areas") this._setZoneDrawing("", false);
@@ -2009,6 +2065,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     });
 
     this._bindZoneTools();
+    this._bindModelViewTools();
 
     this.shadowRoot.querySelectorAll("[data-auto-place]").forEach((element) => {
       element.addEventListener("click", (event) => {
@@ -2812,6 +2869,138 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ${this._zonePointEditor(activeZone)}
       ` : ""}
     `;
+  }
+
+  _modelViewToolsTemplate() {
+    const floorViews = this._modelViews?.[this._activeFloorId || "default"] || {};
+    const draft = this._modelViewDraft || { name: "", position: [], target: [], zoom: 1 };
+    const value = (items, index) => items?.[index] ?? "";
+    return `
+      <label>
+        <span>View name</span>
+        <input data-view-name value="${this._escape(draft.name || "")}" placeholder="Living room" />
+      </label>
+      <div class="view-coordinate-grid">
+        <strong>Position</strong>
+        ${[0, 1, 2].map((index) => `
+        <label>
+          <span>${["X", "Y", "Z"][index]}</span>
+          <input data-view-position="${index}" type="number" step="0.0001" value="${this._escape(value(draft.position, index))}" />
+        </label>`).join("")}
+      </div>
+      <div class="view-coordinate-grid">
+        <strong>Target</strong>
+        ${[0, 1, 2].map((index) => `
+        <label>
+          <span>${["X", "Y", "Z"][index]}</span>
+          <input data-view-target="${index}" type="number" step="0.0001" value="${this._escape(value(draft.target, index))}" />
+        </label>`).join("")}
+      </div>
+      <label>
+        <span>Zoom</span>
+        <input data-view-zoom type="number" min="0.01" step="0.01" value="${this._escape(draft.zoom ?? 1)}" />
+      </label>
+      <div class="view-actions">
+        <button type="button" data-view-save>Save View</button>
+        <button type="button" data-view-clear>Clear Form</button>
+      </div>
+      <div class="saved-view-list">
+        ${Object.keys(floorViews).sort((a, b) => a.localeCompare(b)).map((name) => `
+          <div class="saved-view-row">
+            <button type="button" data-view-select="${this._escape(name)}">${this._escape(name)}</button>
+            <button type="button" data-view-go="${this._escape(name)}" title="Go to view">Go</button>
+            <button type="button" data-view-remove="${this._escape(name)}" title="Remove view">Remove</button>
+          </div>
+        `).join("") || `<div class="empty-list">No named views saved</div>`}
+      </div>
+    `;
+  }
+
+  _refreshModelViewTools() {
+    const tools = this.shadowRoot?.querySelector(".view-tools");
+    if (!tools) return;
+    tools.innerHTML = `
+      <div class="zone-tools-title">
+        <strong>Camera Views</strong>
+        <button type="button" data-view-use-current>Use Current Camera</button>
+      </div>
+      ${this._modelViewToolsTemplate()}
+    `;
+    this._bindModelViewTools(tools);
+  }
+
+  _bindModelViewTools(root = this.shadowRoot) {
+    root?.querySelectorAll("[data-view-use-current]").forEach((element) => {
+      element.addEventListener("click", () => {
+        const view = this._currentModelCameraView();
+        if (!view) return;
+        this._modelViewDraft = { ...this._modelViewDraft, position: view.position, target: view.target, zoom: view.zoom || 1 };
+        this._refreshModelViewTools();
+      });
+    });
+    root?.querySelectorAll("[data-view-save]").forEach((element) => {
+      element.addEventListener("click", () => this._saveNamedModelView(root));
+    });
+    root?.querySelectorAll("[data-view-clear]").forEach((element) => {
+      element.addEventListener("click", () => {
+        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1 };
+        this._refreshModelViewTools();
+      });
+    });
+    root?.querySelectorAll("[data-view-select]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        const name = event.currentTarget.dataset.viewSelect;
+        const view = this._modelViews?.[this._activeFloorId || "default"]?.[name];
+        if (!view) return;
+        this._modelViewDraft = { name, position: [...view.position], target: [...view.target], zoom: view.zoom || 1 };
+        this._refreshModelViewTools();
+      });
+    });
+    root?.querySelectorAll("[data-view-go]").forEach((element) => {
+      element.addEventListener("click", (event) => this._setModelView(event.currentTarget.dataset.viewGo));
+    });
+    root?.querySelectorAll("[data-view-remove]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        const name = event.currentTarget.dataset.viewRemove;
+        delete this._modelViews[this._activeFloorId || "default"]?.[name];
+        this._saveModelViews();
+        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1 };
+        this._refreshModelViewTools();
+      });
+    });
+    root?.querySelectorAll("[data-view-name], [data-view-position], [data-view-target], [data-view-zoom]").forEach((element) => {
+      element.addEventListener("input", (event) => this._updateModelViewDraft(event.currentTarget));
+    });
+  }
+
+  _updateModelViewDraft(element) {
+    const draft = { ...this._modelViewDraft };
+    if (element.dataset.viewName !== undefined) draft.name = element.value;
+    if (element.dataset.viewPosition !== undefined) draft.position = this._updateViewCoordinate(draft.position, element.dataset.viewPosition, element.value);
+    if (element.dataset.viewTarget !== undefined) draft.target = this._updateViewCoordinate(draft.target, element.dataset.viewTarget, element.value);
+    if (element.dataset.viewZoom !== undefined) draft.zoom = element.value;
+    this._modelViewDraft = draft;
+  }
+
+  _updateViewCoordinate(values, index, value) {
+    const next = [...(values || [])];
+    next[Number(index)] = value;
+    return next;
+  }
+
+  _saveNamedModelView(root) {
+    const name = String(this._modelViewDraft?.name || root.querySelector("[data-view-name]")?.value || "").trim();
+    const position = this._numberArray(this._modelViewDraft?.position, 3);
+    const target = this._numberArray(this._modelViewDraft?.target, 3);
+    const zoom = Number(this._modelViewDraft?.zoom);
+    if (!name || !position || !target || !Number.isFinite(zoom) || zoom <= 0) return;
+    const floorId = this._activeFloorId || "default";
+    this._modelViews[floorId] = this._modelViews[floorId] || {};
+    this._modelViews[floorId][name] = { position, target, zoom };
+    this._modelViewDraft = { name, position, target, zoom };
+    this._saveModelViews();
+    this._refreshModelViewTools();
+    this._refreshModelCompass();
   }
 
   _ambientDarknessTemplate() {
@@ -8419,7 +8608,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
         .sidebar-tabs {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 4px;
           border-radius: 8px;
           background: var(--secondary-background-color, #f7f8fa);
@@ -8444,9 +8633,35 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
         }
 
-        .filters, .bulk-actions, .zone-tools {
+        .filters, .bulk-actions, .zone-tools, .view-tools {
           display: grid;
           gap: 8px;
+        }
+
+        .view-coordinate-grid {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 6px;
+        }
+
+        .view-coordinate-grid > strong {
+          grid-column: 1 / -1;
+          font-size: 12px;
+        }
+
+        .view-actions, .saved-view-row {
+          display: flex;
+          gap: 6px;
+        }
+
+        .saved-view-row {
+          align-items: center;
+          justify-content: space-between;
+        }
+
+        .saved-view-row button:first-child {
+          flex: 1;
+          text-align: left;
         }
 
         .filters-toggle {
@@ -11052,6 +11267,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <h3>Editing & Display</h3>
           <div class="editor-grid">
             ${this._checkboxInput("allow_edit", "Allow Admin Edit Mode", true)}
+            ${this._checkboxInput("show_navigation_buttons", "Show 3D Navigation Buttons", true)}
             ${this._checkboxInput("show_labels", "Show Marker Names", true)}
             ${this._checkboxInput("show_entity_state", "Use Entity State Colors", true)}
             ${this._numberInput("marker_size", "Marker Size", 18, 8, 64, 1)}
@@ -11597,8 +11813,9 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       if (sections.has("brightness_zones") || sections.has("floors")) {
         coordinateSuffixes.forEach((suffix) => removeKeys.add(`home-assistant-3d-floorplan:brightness-zones${suffix}:${path}:${cardKey}`));
       }
-      if (sections.has("default_view") || sections.has("floors")) {
+      if (sections.has("default_view") || sections.has("views") || sections.has("floors")) {
         coordinateSuffixes.forEach((suffix) => removeKeys.add(`home-assistant-3d-floorplan:model-default-view${suffix}:${path}:${cardKey}`));
+        coordinateSuffixes.forEach((suffix) => removeKeys.add(`home-assistant-3d-floorplan:model-views${suffix}:${path}:${cardKey}`));
       }
       if (sections.has("light_presets")) {
         removeKeys.add(`home-assistant-3d-floorplan:light-presets:${path}:${cardKey}`);

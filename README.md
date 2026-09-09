@@ -163,6 +163,8 @@ Switch to Edit Mode to place and configure markers.
 
 **Sidebar** - lists all HA entities. Placed markers show a **Remove** button. Unplaced markers show **Add**; clicking it then clicking the 3D model places the marker at that surface point.
 
+**Views** - open the **Views** tab, position the camera in the 3D model, and press **Use Current Camera**. Enter a name and press **Save View**. Saved views can be selected for editing, previewed with **Go**, or removed. Views are stored per floor and included in the YAML export.
+
 **Floating panel** - selecting a placed marker opens a panel on the right with:
 - Icon picker
 - Marker display setting
