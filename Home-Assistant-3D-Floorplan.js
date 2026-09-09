@@ -2858,7 +2858,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
             .map((axis) => `
           <label>
             <span>${this._axisLabelHTML(axis)}</span>
-            <input data-zone-point-coordinate="${axis}" data-zone-point-key="${this._escape(zone.id)}" data-zone-point-index="${selectedIndex}" type="number" step="1" value="${this._escape(this._formatCoordinateInteger(selectedPoint[axis]))}" />
+            <input data-zone-point-coordinate="${axis}" data-zone-point-key="${this._escape(zone.id)}" data-zone-point-index="${selectedIndex}" type="number" step="0.01" value="${this._escape(this._formatCoordinate(selectedPoint[axis]))}" />
           </label>
           `)
             .join("")}
@@ -2870,7 +2870,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               const [fa0, fa1] = this._floorAxes();
               return `
           <button type="button" data-zone-point-select="${this._escape(zone.id)}" data-zone-point-index="${index}" class="${index === selectedIndex ? "active" : ""}">
-            ${index + 1}. ${fa0.toUpperCase()} ${this._escape(this._formatCoordinateInteger(displayPoint[fa0]))} / ${fa1.toUpperCase()} ${this._escape(this._formatCoordinateInteger(displayPoint[fa1]))}
+            ${index + 1}. ${fa0.toUpperCase()} ${this._escape(this._formatCoordinate(displayPoint[fa0]))} / ${fa1.toUpperCase()} ${this._escape(this._formatCoordinate(displayPoint[fa1]))}
           </button>
           `;
             })
@@ -3122,7 +3122,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const number = Number(value);
     if (!Number.isFinite(number)) return;
     const displayPoint = this._modelToDisplayPoint(zone.points[index]);
-    displayPoint[axis] = Math.round(number);
+    displayPoint[axis] = Number(number.toFixed(4));
     zone.points[index] = this._zoneDisplayPointToModel(displayPoint);
     this._activeZoneId = zoneId;
     this._activeZonePointIndex = index;
@@ -5050,8 +5050,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         points: (zone.points || []).map((point) => {
           const displayPoint = this._modelToDisplayPoint(point);
           return {
-            [floorAxes[0]]: this._formatCoordinateInteger(displayPoint[floorAxes[0]]),
-            [floorAxes[1]]: this._formatCoordinateInteger(displayPoint[floorAxes[1]]),
+            [floorAxes[0]]: this._formatCoordinate(displayPoint[floorAxes[0]]),
+            [floorAxes[1]]: this._formatCoordinate(displayPoint[floorAxes[1]]),
           };
         }),
       }))
@@ -8069,9 +8069,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const displayPoint = this._modelToDisplayPoint(point);
     const modelPoint = this._zoneDisplayPointToModel(displayPoint);
     zone.points = [...(zone.points || []), {
-      x: Math.round(modelPoint.x),
-      y: Math.round(modelPoint.y),
-      z: Math.round(modelPoint.z),
+      x: Number(modelPoint.x.toFixed(4)),
+      y: Number(modelPoint.y.toFixed(4)),
+      z: Number(modelPoint.z.toFixed(4)),
     }];
     this._activeZoneId = zoneId;
     this._activeZonePointIndex = zone.points.length - 1;
