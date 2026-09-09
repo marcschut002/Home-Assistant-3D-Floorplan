@@ -115,6 +115,24 @@ test("hafp_view and hafp_floor are read from a navigation hash", () => {
   reset();
 });
 
+test("zone floor_offset is normalised from YAML config", () => {
+  const card = makeCard();
+  const zones = card._zonesFromList([{ id: "upstairs", name: "Upstairs", floor_offset: 2.5, points: [] }]);
+  assert.equal(zones.upstairs.floorOffset, 2.5);
+});
+
+test("zone floor_offset defaults to 0 when omitted", () => {
+  const card = makeCard();
+  const zones = card._zonesFromList([{ id: "ground", name: "Ground", points: [] }]);
+  assert.equal(zones.ground.floorOffset, 0);
+});
+
+test("_zoneFloorLevel raises the floor plane by the configured offset", () => {
+  const card = makeCard();
+  assert.equal(card._zoneFloorLevel({ floorOffset: 2.5 }), 2.5);
+  assert.equal(card._zoneFloorLevel({ floorOffset: 0 }), 0);
+});
+
 test("the same named view can be applied again", () => {
   const applied = [];
   const card = makeCard({

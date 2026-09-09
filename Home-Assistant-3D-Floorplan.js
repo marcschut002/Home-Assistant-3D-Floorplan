@@ -952,6 +952,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         name: zone.name || `Area ${index + 1}`,
         color: zone.color || "#f8d66d",
         height: this._zoneHeight(zone),
+        floorOffset: this._zoneFloorOffsetValue(zone.floor_offset ?? zone.floorOffset),
         dayOpacity: this._zoneOpacityValue(zone.day_opacity ?? zone.dayOpacity, 0.5),
         nightOpacity: this._zoneOpacityValue(zone.night_opacity ?? zone.nightOpacity, 1),
         illuminanceEnabled: zone.illuminance_enabled === true || zone.illuminanceEnabled === true || Boolean(zone.illuminance?.enabled),
@@ -1274,6 +1275,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         name: zone.name || `Area ${index + 1}`,
         color: zone.color || "#f8d66d",
         height: this._zoneHeight(zone),
+        floorOffset: this._zoneFloorOffsetValue(zone.floorOffset ?? zone.floor_offset),
         dayOpacity: this._zoneOpacityValue(zone.dayOpacity ?? zone.day_opacity, 0.5),
         nightOpacity: this._zoneOpacityValue(zone.nightOpacity ?? zone.night_opacity, 1),
         illuminanceEnabled: zone.illuminanceEnabled === true || zone.illuminance_enabled === true || Boolean(zone.illuminance?.enabled),
@@ -1308,6 +1310,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _zoneOpacity(zone = {}, mode) {
     return mode === "night" ? this._zoneOpacityValue(zone.nightOpacity ?? zone.night_opacity, 1) : this._zoneOpacityValue(zone.dayOpacity ?? zone.day_opacity, 0.5);
+  }
+
+  _zoneFloorOffsetValue(value) {
+    const number = Number(value);
+    return Number.isFinite(number) ? Number(number.toFixed(4)) : 0;
   }
 
   _zoneOpacityValue(value, fallback) {
@@ -2856,6 +2863,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         <input data-zone-height="${this._escape(activeZone.id)}" type="number" step="0.01" value="${this._escape(this._formatCoordinate(this._zoneHeight(activeZone)))}" />
       </label>
       <label>
+        <span>Floor Offset (from model bottom)</span>
+        <input data-zone-floor-offset="${this._escape(activeZone.id)}" type="number" step="0.01" value="${this._escape(this._formatCoordinate(activeZone.floorOffset || 0))}" />
+      </label>
+      <label>
         <span>Lighting mode</span>
         <select data-zone-lighting-mode="${this._escape(activeZone.id)}">
           <option value="area" ${(activeZone.lightingMode || "area") === "area" ? "selected" : ""}>Area (zone-wide glow)</option>
@@ -3176,6 +3187,18 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         this._refresh3DZoneOverlay();
       });
     });
+    root?.querySelectorAll("[data-zone-floor-offset]").forEach((element) => {
+      element.addEventListener("change", (event) => {
+        const zone = this._zones[event.currentTarget.dataset.zoneFloorOffset];
+        if (!zone) return;
+        const offset = Number(event.currentTarget.value);
+        if (!Number.isFinite(offset)) return;
+        zone.floorOffset = this._zoneFloorOffsetValue(offset);
+        this._saveZones();
+        this._refreshZoneTools();
+        this._refresh3DZoneOverlay();
+      });
+    });
     root?.querySelectorAll("[data-zone-opacity]").forEach((element) => {
       element.addEventListener("change", (event) => {
         const zone = this._zones[event.currentTarget.dataset.zoneOpacityKey];
@@ -3297,6 +3320,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       name,
       color: "#f8d66d",
       height: 0,
+      floorOffset: 0,
       dayOpacity: 0.5,
       nightOpacity: 1,
       illuminanceEnabled: false,
@@ -5070,6 +5094,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
                     `        name: ${zone.name}`,
                     `        color: "${zone.color}"`,
                     `        height: ${zone.height}`,
+                    ...(Number(zone.floorOffset) ? [`        floor_offset: ${zone.floorOffset}`] : []),
                     `        day_opacity: ${zone.dayOpacity}`,
                     `        night_opacity: ${zone.nightOpacity}`,
                     ...(zone.lightingMode === "positional" ? [`        lighting_mode: positional`] : []),
@@ -5143,6 +5168,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               `    name: ${zone.name}`,
               `    color: "${zone.color}"`,
               `    height: ${zone.height}`,
+              ...(Number(zone.floorOffset) ? [`    floor_offset: ${zone.floorOffset}`] : []),
               `    day_opacity: ${zone.dayOpacity}`,
               `    night_opacity: ${zone.nightOpacity}`,
               ...(zone.lightingMode === "positional" ? [`    lighting_mode: positional`] : []),
@@ -5331,6 +5357,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         name: zone.name,
         color: zone.color || "#f8d66d",
         height: this._formatCoordinate(this._zoneHeight(zone)),
+        floorOffset: this._formatCoordinate(zone.floorOffset || 0),
         dayOpacity: this._formatCoordinate(this._zoneOpacity(zone, "day")),
         nightOpacity: this._formatCoordinate(this._zoneOpacity(zone, "night")),
         illuminanceEnabled: zone.illuminanceEnabled === true,
@@ -7450,13 +7477,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return { point: orientedPoint, direction, spread };
   }
 
-  /** Returns the average vertical-axis position of zone floor points in model space. */
+  /** Returns the zone's floor plane vertical position in model space, from its configured floor offset. */
   _zoneFloorLevel(zone) {
     const map = this._coordinateMap();
     const va = map[this._verticalAxis()];
-    const pts = zone.points || [];
-    if (!pts.length) return 0;
-    return pts.reduce((sum, p) => sum + (Number(p[va]) || 0), 0) / pts.length;
+    return this._displayToModelVector(this._displayHeightVector(Number(zone.floorOffset) || 0))[va];
   }
 
   /** Parses a CSS color string (hex or rgb()) into {r, g, b} integers. */

@@ -220,6 +220,7 @@ brightness_zones:
     name: Living Room
     color: "#f8d66d"
     height: 280
+    floor_offset: 0
     day_opacity: 0.50
     night_opacity: 1.00
     lighting_mode: positional
@@ -236,6 +237,8 @@ brightness_zones:
 ```
 
 **Illuminance sensor** - when enabled, the shade is driven dynamically by a lux sensor. Low lux approaches night shade; 300 lux reaches day shade; brighter reduces shade further. The sensor is selected from a searchable dropdown of all `sensor.*` and `input_number.*` entities. Falls back to `sun.sun` day/night when disabled or sensor is unavailable.
+
+**Floor Offset** - the zone's floor plane always sits at the model's vertical origin (0) by default. For an upper floor whose model geometry starts higher up (e.g. a mezzanine at 2.5m), set **Floor Offset** in the zone settings (or `floor_offset` in YAML) to raise the zone's floor, wall glow, and ceiling calculations to the correct elevation.
 
 ## Light Types (Positional Mode)
 
