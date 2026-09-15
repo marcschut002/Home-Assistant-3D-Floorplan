@@ -33,6 +33,13 @@ show_navigation_buttons: true
 markers: []
 ```
 
+In Edit Mode, set **Model Background Mode** to **Transparent** to show the Home
+Assistant card background behind the 3D model. In YAML, use:
+
+```yaml
+model_background: transparent
+```
+
 Set `show_navigation_buttons: false` to hide the 3D navigation buttons (`N`,
 `W`, `E`, `S`, `Top`, `Home`, `Save Home`, and `Clear`).
 

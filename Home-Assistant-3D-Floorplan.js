@@ -134,6 +134,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       vertical_axis: "y",
       light_presets: {},
       model_background: "",
+      model_background_mode: "",
       ambient_darkness: {
         entity: "sun.sun",
         day_opacity: 0.5,
@@ -5460,14 +5461,17 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
       if (status) status.textContent = "Loading 3D model...";
       const scene = new THREE.Scene();
-      const background = this._config.model_background || getComputedStyle(this).getPropertyValue("--card-background-color") || "#111827";
-      scene.background = new THREE.Color(String(background).trim() || "#111827");
+      const background = String(this._config.model_background || getComputedStyle(this).getPropertyValue("--card-background-color") || "#111827").trim();
+      const transparentBackground = String(this._config.model_background_mode || background).toLowerCase() === "transparent";
+      scene.background = transparentBackground ? null : new THREE.Color(background || "#111827");
+      container.style.background = transparentBackground ? "transparent" : background || "#111827";
 
       const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 10000);
       const profile = this._modelPerformanceProfile();
       const antialias = this._modelAntialias(profile);
       const pixelRatio = this._modelPixelRatio(profile);
-      renderer = new THREE.WebGLRenderer({ antialias, alpha: false });
+      renderer = new THREE.WebGLRenderer({ antialias, alpha: transparentBackground });
+      if (transparentBackground) renderer.setClearColor(0x000000, 0);
       renderer.setPixelRatio(pixelRatio);
       if ("outputColorSpace" in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.domElement.style.touchAction = "none";
@@ -11280,6 +11284,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
             ${this._textInput("title", "Title", "3D Floorplan")}
             ${this._textInput("model", "3D Model URL", "/local/floorplans/home.glb")}
             ${this._textInput("model_background", "Model Background", "#111827")}
+            ${this._selectInput("model_background_mode", "Model Background Mode", [["", "Use background color"], ["transparent", "Transparent"]])}
           </div>
         </section>
 
@@ -11761,6 +11766,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       "integrations",
       "areas",
       "coordinate_map",
+      "model_background_mode",
       "model_performance_profile",
       "performance_profile",
       "model_antialias",
