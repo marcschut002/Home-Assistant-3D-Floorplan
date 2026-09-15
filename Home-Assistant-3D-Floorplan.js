@@ -3778,7 +3778,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
             ${["x", "y", "z"].map((axis) => `
               <label>
                 <span>${this._axisLabelHTML(axis)}</span>
-                <input data-sub-spot-coordinate="${axis}" data-sub-spot-coordinate-key="${this._escape(parentKey)}" data-sub-spot-index="${index}" type="number" step="1" value="${this._escape(this._formatCoordinateInteger(displayPoint[axis]))}" />
+                <input data-sub-spot-coordinate="${axis}" data-sub-spot-coordinate-key="${this._escape(parentKey)}" data-sub-spot-index="${index}" type="number" step="0.01" value="${this._escape(this._formatCoordinate(displayPoint[axis]))}" />
               </label>
             `).join("")}
           </div>
@@ -3830,7 +3830,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
             ${["x", "y", "z"].map((axis) => `
               <label>
                 <span>${this._axisLabelHTML(axis)}</span>
-                <input data-light-path-coordinate="${axis}" data-light-path-coordinate-key="${this._escape(parentKey)}" data-light-path-index="${index}" type="number" step="1" value="${this._escape(this._formatCoordinateInteger(displayPoint[axis]))}" />
+                <input data-light-path-coordinate="${axis}" data-light-path-coordinate-key="${this._escape(parentKey)}" data-light-path-index="${index}" type="number" step="0.01" value="${this._escape(this._formatCoordinate(displayPoint[axis]))}" />
               </label>
             `).join("")}
           </div>
@@ -3981,7 +3981,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
             (axis) => `
         <label>
           <span>${this._axisLabelHTML(axis)}</span>
-          <input data-coordinate="${axis}" data-coordinate-key="${this._escape(row.key)}" type="number" step="1" value="${this._escape(this._formatCoordinateInteger(displayPoint[axis]))}" />
+          <input data-coordinate="${axis}" data-coordinate-key="${this._escape(row.key)}" type="number" step="0.01" value="${this._escape(this._formatCoordinate(displayPoint[axis]))}" />
         </label>
         `
           )
@@ -4382,7 +4382,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
             (axis) => `
         <label>
           <span>${this._axisLabelHTML(axis)}</span>
-          <input data-coordinate="${axis}" data-coordinate-key="${this._escape(key)}" type="number" step="1" value="${this._escape(this._formatCoordinateInteger(displayPoint[axis]))}" />
+          <input data-coordinate="${axis}" data-coordinate-key="${this._escape(key)}" type="number" step="0.01" value="${this._escape(this._formatCoordinate(displayPoint[axis]))}" />
         </label>
         `
           )
@@ -5280,22 +5280,22 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               lightRadius: this._normalizeLightRadius(spot.lightRadius),
               lightPreset: spot.lightPreset || "",
               renderParams: spot.renderParams && Object.keys(spot.renderParams).length ? spot.renderParams : null,
-              x: this._formatCoordinateInteger(spotPoint.x),
-              y: this._formatCoordinateInteger(spotPoint.y),
-              z: this._formatCoordinateInteger(spotPoint.z),
+              x: this._formatCoordinate(spotPoint.x),
+              y: this._formatCoordinate(spotPoint.y),
+              z: this._formatCoordinate(spotPoint.z),
             };
           }),
           lightPath: (marker.lightPath || []).map((point) => {
             const pathPoint = this._modelToDisplayPoint(point);
             return {
-              x: this._formatCoordinateInteger(pathPoint.x),
-              y: this._formatCoordinateInteger(pathPoint.y),
-              z: this._formatCoordinateInteger(pathPoint.z),
+              x: this._formatCoordinate(pathPoint.x),
+              y: this._formatCoordinate(pathPoint.y),
+              z: this._formatCoordinate(pathPoint.z),
             };
           }),
-          x: this._formatCoordinateInteger(displayPoint.x),
-          y: this._formatCoordinateInteger(displayPoint.y),
-          z: this._formatCoordinateInteger(displayPoint.z),
+          x: this._formatCoordinate(displayPoint.x),
+          y: this._formatCoordinate(displayPoint.y),
+          z: this._formatCoordinate(displayPoint.z),
         };
       })
       .sort((a, b) => a.name.localeCompare(b.name));
@@ -8029,14 +8029,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (!Number.isFinite(number)) return;
     if (!options.skipHistory) this._pushMarkerHistory();
     const modelAxis = this._coordinateMap()[axis] || axis;
-    const rounded = Math.round(number);
-    this._markers[key][modelAxis] = rounded;
+    this._markers[key][modelAxis] = number;
     if (!options.skipSave) this._saveMarkers();
     this._refresh3DMarkerOverlay();
     if (!options.skipPanelRefresh) this._refreshSelectedMarkerPanel();
     const row = this.shadowRoot?.querySelector(`[data-device="${this._cssEscape(key)}"]`);
     const input = row?.querySelector(`[data-coordinate="${axis}"]`);
-    if (input && document.activeElement !== input) input.value = this._formatCoordinateInteger(rounded);
+    if (input && document.activeElement !== input) input.value = this._formatCoordinate(number);
   }
 
   _updateMarkerAction(key, type, value) {
@@ -8221,7 +8220,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     }
     if (!options.skipHistory) this._pushMarkerHistory();
     const modelAxis = this._coordinateMap()[axis] || axis;
-    subSpot[modelAxis] = Math.round(number);
+    subSpot[modelAxis] = number;
     if (!options.skipSave) this._saveMarkers();
     if (options.skipSave) this._refreshYamlExport();
     this._refresh3DMarkerOverlay();
@@ -8356,7 +8355,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (!Number.isFinite(number)) return;
     if (!options.skipHistory) this._pushMarkerHistory();
     const modelAxis = this._coordinateMap()[axis] || axis;
-    point[modelAxis] = Math.round(number);
+    point[modelAxis] = number;
     if (!options.skipSave) this._saveMarkers();
     if (options.skipSave) this._refreshYamlExport();
     this._refresh3DMarkerOverlay();

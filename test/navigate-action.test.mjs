@@ -127,6 +127,21 @@ test("zone floor_offset defaults to 0 when omitted", () => {
   assert.equal(zones.ground.floorOffset, 0);
 });
 
+test("marker coordinates preserve decimal values", () => {
+  const card = makeCard({
+    _markers: { "light.living": { x: 0, y: 0, z: 0 } },
+    _refresh3DMarkerOverlay: () => {},
+    _refreshSelectedMarkerPanel: () => {},
+    _refreshYamlExport: () => {},
+  });
+  card._update3DMarkerCoordinate("light.living", "x", "12.75", {
+    skipHistory: true,
+    skipSave: true,
+    skipPanelRefresh: true,
+  });
+  assert.equal(card._markers["light.living"].x, 12.75);
+});
+
 test("_zoneFloorLevel raises the floor plane by the configured offset", () => {
   const card = makeCard();
   assert.equal(card._zoneFloorLevel({ floorOffset: 2.5 }), 2.5);
