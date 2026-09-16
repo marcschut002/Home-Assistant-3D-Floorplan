@@ -6413,11 +6413,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
             if (giBounce) zoneGroup.add(giBounce);
             if (isLineType && entityKey) lineTypeFloorDone.add(entityKey);
           }
-          // Only the walls physically close to this light get illuminated
-          const nearWalls = this._nearbyWallGlowMeshes(THREE, zone, light.marker, light.lightRadius, light.color, light.brightness, light.lightType, light.heightFraction);
-          nearWalls.forEach((w) => zoneGroup.add(w));
-          const ceilingGlow = this._createCeilingLightGlowMesh(THREE, zone, light.marker, light.lightType, light.lightRadius, light.color, light.brightness);
-          if (ceilingGlow) zoneGroup.add(ceilingGlow);
         }
         const outline = this._zoneOutline(THREE, zone);
         if (outline) zoneGroup.add(outline);
@@ -6428,8 +6423,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         // Polygon-clipped flat floor glow — stays exactly within zone boundary, no bleed
         const areaGlow = this._zoneAreaGlowMesh(THREE, zone, brightness, lighting.color);
         if (areaGlow) zoneGroup.add(areaGlow);
-        const wallWash = brightness > 0.01 ? this._zoneWallWashMeshes(THREE, zone, brightness * 0.75, lighting.color) : [];
-        wallWash.forEach((wall) => zoneGroup.add(wall));
         const outline = this._zoneOutline(THREE, zone);
         if (outline) zoneGroup.add(outline);
       }
