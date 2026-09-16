@@ -11396,7 +11396,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       <div class="object-config-toolbar">
         <label>
           <span>Configuration scope</span>
-          <ha-select class="editor-field" data-object-config-scope label="Configuration scope" value="${this._escape(this._objectConfigScope)}">${scopeOptions.map(([value, label]) => `<ha-select-option value="${this._escape(value)}">${this._escape(label)}</ha-select-option>`).join("")}</ha-select>
+          <ha-select class="editor-field" data-object-config-scope label="Configuration scope" value="${this._escape(this._objectConfigScope)}">${scopeOptions.map(([value, label]) => `<ha-list-item value="${this._escape(value)}">${this._escape(label)}</ha-list-item>`).join("")}</ha-select>
         </label>
         <button type="button" data-add-object-item="${kind}">Add ${label}</button>
       </div>
@@ -11565,7 +11565,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
   }
 
   _objectSelect(kind, index, key, label, value, options) {
-    return `<ha-select class="editor-field" data-object-kind="${kind}" data-item-index="${index}" data-object-key="${this._escape(key)}" label="${this._escape(label)}" value="${this._escape(value ?? "")}">${options.map(([optionValue, optionLabel]) => `<ha-select-option value="${this._escape(optionValue)}">${this._escape(optionLabel)}</ha-select-option>`).join("")}</ha-select>`;
+    return `<ha-select class="editor-field" data-object-kind="${kind}" data-item-index="${index}" data-object-key="${this._escape(key)}" label="${this._escape(label)}" value="${this._escape(value ?? "")}">${options.map(([optionValue, optionLabel]) => `<ha-list-item value="${this._escape(optionValue)}">${this._escape(optionLabel)}</ha-list-item>`).join("")}</ha-select>`;
   }
 
   _attachEditorEvents() {
@@ -12176,7 +12176,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
 
   _selectInput(key, label, options, fallback = "") {
     const value = this._getConfigPath(key) ?? fallback;
-    return `<ha-select class="editor-field" data-config-key="${this._escape(key)}" label="${this._escape(label)}" value="${this._escape(value)}">${options.map(([optionValue, optionLabel]) => `<ha-select-option value="${this._escape(optionValue)}">${this._escape(optionLabel)}</ha-select-option>`).join("")}</ha-select>`;
+    return `<ha-select class="editor-field" data-config-key="${this._escape(key)}" label="${this._escape(label)}" value="${this._escape(value)}">${options.map(([optionValue, optionLabel]) => `<ha-list-item value="${this._escape(optionValue)}">${this._escape(optionLabel)}</ha-list-item>`).join("")}</ha-select>`;
   }
 
   _field(label, inputHtml) {
