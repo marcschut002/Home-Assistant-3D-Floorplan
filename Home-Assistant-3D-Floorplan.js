@@ -6392,15 +6392,17 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       const lighting = this._zoneLighting(zone, rowByKey);
       const brightness = lighting.brightness;
       const darkness = this._zoneDarkness(brightness, zone);
+      const wallDarkness = this._zoneDarkness(brightness, zone, false);
 
       if (zone.lightingMode === "positional") {
         // --- Individual Light Glow: walls always at full ambient darkness, only per-light glow lifts nearby walls ---
-        const ambientDarkness = this._zoneAmbientDarknessOpacity(zone); // ignores light state — always max dark base
+        const floorDarkness = this._zoneAmbientDarknessOpacity(zone);
+        const ambientDarkness = this._zoneAmbientDarknessOpacity(zone, false); // lux affects the floor only
         // Keep the floor shade subtle so tile/material texture stays visible.
         // All walls stay fully dark regardless of which lights are on
         const wallShade = this._zoneWallShadeMeshes(THREE, zone, ambientDarkness);
         wallShade.forEach((wall) => zoneGroup.add(wall));
-        const floorShade = this._zoneFloorShadeMesh(THREE, zone, ambientDarkness, "positional");
+        const floorShade = this._zoneFloorShadeMesh(THREE, zone, floorDarkness, "positional");
         if (floorShade) zoneGroup.add(floorShade);
         const lights = this._positionalLights(zone, rowByKey);
         const ceilingShade = this._zoneCeilingShadeMesh(THREE, zone, ambientDarkness);
@@ -6428,11 +6430,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         if (outline) zoneGroup.add(outline);
       } else {
         // --- Area mode: single large soft pool centered on zone + wall wash ---
-        const wallShade = this._zoneWallShadeMeshes(THREE, zone, darkness);
+        const wallShade = this._zoneWallShadeMeshes(THREE, zone, wallDarkness);
         wallShade.forEach((wall) => zoneGroup.add(wall));
         const floorShade = this._zoneFloorShadeMesh(THREE, zone, darkness, "area");
         if (floorShade) zoneGroup.add(floorShade);
-        const ceilingDarkness = this._zoneCeilingDarkness(darkness, lighting.lights || []);
+        const ceilingDarkness = this._zoneCeilingDarkness(wallDarkness, lighting.lights || []);
         const ceilingShade = this._zoneCeilingShadeMesh(THREE, zone, ceilingDarkness);
         if (ceilingShade) zoneGroup.add(ceilingShade);
         // Polygon-clipped flat floor glow — stays exactly within zone boundary, no bleed
@@ -7165,8 +7167,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return Math.max(0, Math.min(1, isNight ? config.night_opacity : config.day_opacity));
   }
 
-  _zoneAmbientDarknessOpacity(zone) {
-    const illuminance = this._zoneIlluminanceOpacity(zone);
+  _zoneAmbientDarknessOpacity(zone, useIlluminance = true) {
+    const illuminance = useIlluminance ? this._zoneIlluminanceOpacity(zone) : null;
     if (illuminance !== null) return illuminance;
     const config = this._ambientDarknessConfig();
     if (config.disabled) return 0;
@@ -7199,8 +7201,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return number.toFixed(2);
   }
 
-  _zoneDarkness(brightness, zone) {
-    const ambient = this._zoneAmbientDarknessOpacity(zone);
+  _zoneDarkness(brightness, zone, useIlluminance = true) {
+    const ambient = this._zoneAmbientDarknessOpacity(zone, useIlluminance);
     const lightReduction = Math.max(0, Math.min(1, brightness));
     return Math.max(0, Math.min(1, ambient * (1 - lightReduction)));
   }
