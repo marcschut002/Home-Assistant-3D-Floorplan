@@ -7422,7 +7422,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _zoneFloorLevel(zone) {
     const map = this._coordinateMap();
     const va = map[this._verticalAxis()];
-    return this._displayToModelVector(this._displayHeightVector(Number(zone.floorOffset) || 0))[va];
+    const modelBottom = Number(this._modelViewer?.modelBounds?.min?.[va]);
+    const baseLevel = Number.isFinite(modelBottom) ? modelBottom : 0;
+    const offset = this._displayToModelVector(this._displayHeightVector(Number(zone.floorOffset) || 0))[va];
+    return baseLevel + offset;
   }
 
   /** Parses a CSS color string (hex or rgb()) into {r, g, b} integers. */
