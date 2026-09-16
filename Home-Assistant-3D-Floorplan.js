@@ -11088,8 +11088,27 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           min-height: 220px;
         }
 
-        .floorplan-editor .textarea-field ha-textarea {
+        .floorplan-editor .editor-yaml-textarea {
+          display: block;
           width: 100%;
+          min-height: 220px;
+          box-sizing: border-box;
+          resize: vertical;
+          border: 1px solid var(--input-idle-line-color, var(--divider-color, rgba(127, 127, 127, 0.35)));
+          border-radius: 4px;
+          background: var(--input-fill-color, var(--secondary-background-color, #f7f8fa));
+          color: var(--input-ink-color, var(--primary-text-color));
+          font: inherit;
+          font-family: var(--ha-font-family-code, monospace);
+          font-size: 13px;
+          line-height: 1.45;
+          padding: 12px;
+        }
+
+        .floorplan-editor .editor-yaml-textarea:focus {
+          border-color: var(--primary-color, #03a9f4);
+          outline: 2px solid color-mix(in srgb, var(--primary-color, #03a9f4) 25%, transparent);
+          outline-offset: 0;
         }
 
         .floorplan-editor input,
@@ -11389,7 +11408,8 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <h3>Import Config YAML</h3>
           <div class="editor-help">Paste the full output of <strong>Copy YAML</strong> here. Applies markers, zones, animations, interactive objects, presets, and ambient darkness all at once.</div>
           <div class="textarea-field">
-            <ha-textarea data-full-config-yaml label="Configuration YAML" rows="10" resize="vertical" placeholder="Paste exported YAML here…"></ha-textarea>
+            <label class="editor-yaml-label" for="full-config-yaml">Configuration YAML</label>
+            <textarea id="full-config-yaml" class="editor-yaml-textarea" data-full-config-yaml spellcheck="false" rows="10" placeholder="Paste exported YAML here…"></textarea>
           </div>
           <ha-button data-apply-full-config>Apply</ha-button>
           ${this._fullConfigError ? `<div class="editor-error">${this._escape(this._fullConfigError)}</div>` : ""}
