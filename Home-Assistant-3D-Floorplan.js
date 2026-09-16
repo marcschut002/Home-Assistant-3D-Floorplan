@@ -11065,14 +11065,20 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           gap: 10px;
         }
 
-        .floorplan-editor label,
-        .editor-field {
+        .floorplan-editor label {
           display: grid;
           gap: 6px;
           min-width: 0;
           color: var(--secondary-text-color);
           font-size: 13px;
           font-weight: 400;
+        }
+
+        .floorplan-editor .editor-field {
+          display: block;
+          width: 100%;
+          min-width: 0;
+          box-sizing: border-box;
         }
 
         .floorplan-editor input,
