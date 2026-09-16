@@ -6392,21 +6392,14 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       const lighting = this._zoneLighting(zone, rowByKey);
       const brightness = lighting.brightness;
       const darkness = this._zoneDarkness(brightness, zone);
-      const wallDarkness = this._zoneDarkness(brightness, zone, false);
 
       if (zone.lightingMode === "positional") {
-        // --- Individual Light Glow: walls always at full ambient darkness, only per-light glow lifts nearby walls ---
+        // --- Individual Light Glow: lux-driven ambient shading is floor-only ---
         const floorDarkness = this._zoneAmbientDarknessOpacity(zone);
-        const ambientDarkness = this._zoneAmbientDarknessOpacity(zone, false); // lux affects the floor only
         // Keep the floor shade subtle so tile/material texture stays visible.
-        // All walls stay fully dark regardless of which lights are on
-        const wallShade = this._zoneWallShadeMeshes(THREE, zone, ambientDarkness);
-        wallShade.forEach((wall) => zoneGroup.add(wall));
         const floorShade = this._zoneFloorShadeMesh(THREE, zone, floorDarkness, "positional");
         if (floorShade) zoneGroup.add(floorShade);
         const lights = this._positionalLights(zone, rowByKey);
-        const ceilingShade = this._zoneCeilingShadeMesh(THREE, zone, ambientDarkness);
-        if (ceilingShade) zoneGroup.add(ceilingShade);
         // For cove/linear: floor fill is zone-wide — only render it once per unique entity key
         const lineTypeFloorDone = new Set();
         for (const light of lights) {
@@ -6430,13 +6423,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         if (outline) zoneGroup.add(outline);
       } else {
         // --- Area mode: single large soft pool centered on zone + wall wash ---
-        const wallShade = this._zoneWallShadeMeshes(THREE, zone, wallDarkness);
-        wallShade.forEach((wall) => zoneGroup.add(wall));
         const floorShade = this._zoneFloorShadeMesh(THREE, zone, darkness, "area");
         if (floorShade) zoneGroup.add(floorShade);
-        const ceilingDarkness = this._zoneCeilingDarkness(wallDarkness, lighting.lights || []);
-        const ceilingShade = this._zoneCeilingShadeMesh(THREE, zone, ceilingDarkness);
-        if (ceilingShade) zoneGroup.add(ceilingShade);
         // Polygon-clipped flat floor glow — stays exactly within zone boundary, no bleed
         const areaGlow = this._zoneAreaGlowMesh(THREE, zone, brightness, lighting.color);
         if (areaGlow) zoneGroup.add(areaGlow);
