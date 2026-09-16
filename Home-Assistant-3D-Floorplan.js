@@ -11016,6 +11016,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
     this._config = {};
     this._markerYamlError = "";
     this._objectConfigScope = "root";
+    this._editingFloorIndex = null;
   }
 
   setConfig(config) {
@@ -11193,6 +11194,58 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           text-align: center;
         }
 
+        .floor-config-list {
+          display: grid;
+          gap: 10px;
+        }
+
+        .floor-config-card {
+          display: grid;
+          gap: 10px;
+          padding: 10px;
+          border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.25));
+          border-radius: 7px;
+          background: var(--secondary-background-color, #f7f8fa);
+        }
+
+        .floor-config-card header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
+
+        .floor-config-card header strong {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .floor-config-actions {
+          display: flex;
+          gap: 6px;
+        }
+
+        .floor-config-actions button,
+        .floor-config-add {
+          width: auto;
+          border: 1px solid var(--primary-color, #03a9f4);
+          border-radius: 6px;
+          background: transparent;
+          color: var(--primary-color, #03a9f4);
+          cursor: pointer;
+          font: inherit;
+          font-size: 12px;
+          font-weight: 700;
+          padding: 6px 10px;
+        }
+
+        .floor-config-actions button[data-floor-remove] {
+          border-color: var(--error-color, #db4437);
+          color: var(--error-color, #db4437);
+        }
+
         @media (max-width: 600px) {
           .state-style-row {
             grid-template-columns: 1fr 1fr;
@@ -11217,6 +11270,15 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
             ${this._numberInput("model_pixel_ratio", "Pixel Ratio Override", 0, 0, 3, 0.25)}
           </div>
           <div class="editor-help">Quality keeps the sharp original render path. Use Balanced, Performance, or Mobile only for heavier models.</div>
+        </section>
+
+        <section>
+          <h3>Floors</h3>
+          <div class="editor-help">Manage floors in the same order as they appear in the card. Edit the ID, name, or model URL for each floor.</div>
+          <div class="floor-config-list">
+            ${this._renderFloorEditors()}
+          </div>
+          <button type="button" class="floor-config-add" data-floor-add>Floor toevoegen</button>
         </section>
 
         <section>
@@ -11320,6 +11382,71 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         <button type="button" data-add-object-item="${kind}">Add ${label}</button>
       </div>
     `;
+  }
+
+  _renderFloorEditors() {
+    const floors = Array.isArray(this._config.floors) ? this._config.floors : [];
+    if (!floors.length) return `<div class="object-config-empty">Nog geen floors geconfigureerd.</div>`;
+    return floors.map((floor, index) => {
+      const label = floor.name || floor.id || `Floor ${index + 1}`;
+      const editing = this._editingFloorIndex === index;
+      return `
+        <article class="floor-config-card">
+          <header>
+            <strong>${this._escape(label)}</strong>
+            <div class="floor-config-actions">
+              <button type="button" data-floor-edit="${index}" aria-label="${editing ? "Stop editing" : "Edit floor"}">${editing ? "Done" : "Edit"}</button>
+              <button type="button" data-floor-remove="${index}" aria-label="Remove floor">Remove</button>
+            </div>
+          </header>
+          ${editing ? `
+          <div class="editor-grid">
+            <label>
+              <span>ID</span>
+              <input data-floor-field="id" data-floor-index="${index}" value="${this._escape(floor.id || "")}" />
+            </label>
+            <label>
+              <span>Name</span>
+              <input data-floor-field="name" data-floor-index="${index}" value="${this._escape(floor.name || "")}" />
+            </label>
+            <label>
+              <span>Model URL</span>
+              <input data-floor-field="model" data-floor-index="${index}" value="${this._escape(floor.model || "")}" placeholder="/local/floorplans/floor.glb" />
+            </label>
+          </div>
+          ` : ""}
+        </article>
+      `;
+    }).join("");
+  }
+
+  _handleFloorInput(input) {
+    const index = Number(input.dataset.floorIndex);
+    const key = input.dataset.floorField;
+    if (!Number.isInteger(index) || !["id", "name", "model"].includes(key)) return;
+    const nextConfig = JSON.parse(JSON.stringify(this._config || {}));
+    if (!Array.isArray(nextConfig.floors) || !nextConfig.floors[index]) return;
+    nextConfig.floors[index][key] = input.value.trim();
+    this._commitConfig(nextConfig);
+  }
+
+  _addFloor() {
+    const nextConfig = JSON.parse(JSON.stringify(this._config || {}));
+    if (!Array.isArray(nextConfig.floors)) nextConfig.floors = [];
+    const index = nextConfig.floors.length;
+    nextConfig.floors.push({ id: `floor-${index + 1}`, name: `Floor ${index + 1}`, model: "" });
+    this._editingFloorIndex = index;
+    this._commitConfig(nextConfig);
+    this._render();
+  }
+
+  _removeFloor(index) {
+    const nextConfig = JSON.parse(JSON.stringify(this._config || {}));
+    if (!Array.isArray(nextConfig.floors) || !nextConfig.floors[index]) return;
+    nextConfig.floors.splice(index, 1);
+    this._editingFloorIndex = null;
+    this._commitConfig(nextConfig);
+    this._render();
   }
 
   _objectConfigTarget(config = this._config) {
@@ -11438,6 +11565,20 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
   }
 
   _attachEditorEvents() {
+    this.querySelectorAll("[data-floor-edit]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const index = Number(button.dataset.floorEdit);
+        this._editingFloorIndex = this._editingFloorIndex === index ? null : index;
+        this._render();
+      });
+    });
+    this.querySelectorAll("[data-floor-remove]").forEach((button) => {
+      button.addEventListener("click", () => this._removeFloor(Number(button.dataset.floorRemove)));
+    });
+    this.querySelector("[data-floor-add]")?.addEventListener("click", () => this._addFloor());
+    this.querySelectorAll("[data-floor-field]").forEach((input) => {
+      input.addEventListener("change", (event) => this._handleFloorInput(event.currentTarget));
+    });
     this.querySelectorAll("[data-config-key]").forEach((element) => {
       const eventName = element.type === "checkbox" ? "change" : "change";
       element.addEventListener(eventName, (event) => this._handleConfigInput(event.currentTarget));
