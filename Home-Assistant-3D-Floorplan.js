@@ -11031,24 +11031,32 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       <style>
         .floorplan-editor {
           display: grid;
-          gap: 14px;
-          padding: 12px 0;
+          gap: 0;
+          padding: 0;
           color: var(--primary-text-color);
         }
 
         .floorplan-editor section {
           display: grid;
-          gap: 10px;
-          padding: 12px;
-          border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.25));
-          border-radius: 8px;
-          background: var(--card-background-color, #fff);
+          gap: 16px;
+          padding: 20px 0;
+          border-bottom: 1px solid var(--divider-color, rgba(127, 127, 127, 0.25));
+          background: transparent;
+        }
+
+        .floorplan-editor section:first-child {
+          padding-top: 4px;
+        }
+
+        .floorplan-editor section:last-child {
+          border-bottom: 0;
         }
 
         .floorplan-editor h3 {
           margin: 0;
-          font-size: 14px;
-          font-weight: 700;
+          color: var(--primary-text-color);
+          font-size: 16px;
+          font-weight: 500;
         }
 
         .editor-grid {
@@ -11059,23 +11067,34 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
 
         .floorplan-editor label {
           display: grid;
-          gap: 4px;
+          gap: 6px;
           min-width: 0;
-          font-size: 12px;
-          font-weight: 700;
+          color: var(--secondary-text-color);
+          font-size: 13px;
+          font-weight: 400;
         }
 
         .floorplan-editor input,
         .floorplan-editor select,
         .floorplan-editor textarea {
           width: 100%;
+          min-height: 48px;
           box-sizing: border-box;
-          border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.35));
-          border-radius: 6px;
-          background: var(--secondary-background-color, #f7f8fa);
-          color: var(--primary-text-color);
+          border: 1px solid var(--input-idle-line-color, var(--divider-color, rgba(127, 127, 127, 0.35)));
+          border-radius: 4px;
+          background: var(--input-fill-color, var(--secondary-background-color, #f7f8fa));
+          color: var(--input-ink-color, var(--primary-text-color));
           font: inherit;
-          padding: 8px;
+          padding: 13px 12px 9px;
+          transition: border-color 120ms ease, box-shadow 120ms ease;
+        }
+
+        .floorplan-editor input:focus,
+        .floorplan-editor select:focus,
+        .floorplan-editor textarea:focus {
+          border-color: var(--input-label-ink-color, var(--primary-color, #03a9f4));
+          outline: 2px solid color-mix(in srgb, var(--primary-color, #03a9f4) 25%, transparent);
+          outline-offset: 0;
         }
 
         .floorplan-editor textarea {
@@ -11090,16 +11109,21 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           display: flex;
           align-items: center;
           justify-content: space-between;
+          min-height: 48px;
           gap: 10px;
+          color: var(--primary-text-color) !important;
         }
 
         .checkbox-row input {
           width: auto;
+          min-height: auto;
+          padding: 0;
+          accent-color: var(--primary-color, #03a9f4);
         }
 
         .editor-help {
           color: var(--secondary-text-color);
-          font-size: 12px;
+          font-size: 13px;
           line-height: 1.4;
         }
 
@@ -11129,10 +11153,10 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         .object-config-card {
           display: grid;
           gap: 10px;
-          padding: 10px;
-          border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.25));
-          border-radius: 7px;
-          background: var(--secondary-background-color, #f7f8fa);
+          padding: 16px;
+          border: 1px solid var(--ha-card-border-color, var(--divider-color, rgba(127, 127, 127, 0.25)));
+          border-radius: 8px;
+          background: var(--ha-card-background, var(--card-background-color, transparent));
         }
 
         .object-config-card header,
@@ -11149,23 +11173,36 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
 
         .object-config-card button,
         .object-config-toolbar button,
-        .state-style-editor button {
+        .state-style-editor button,
+        .floor-config-actions button,
+        .floor-config-add {
           width: auto;
-          border: 1px solid var(--primary-color, #03a9f4);
-          border-radius: 6px;
-          background: transparent;
-          color: var(--primary-color, #03a9f4);
+          min-height: 40px;
+          border: 0;
+          border-radius: 20px;
+          background: var(--primary-color, #03a9f4);
+          color: var(--text-primary-color, #fff);
           cursor: pointer;
           font: inherit;
-          font-size: 12px;
-          font-weight: 700;
-          padding: 6px 10px;
+          font-size: 14px;
+          font-weight: 500;
+          padding: 0 16px;
+          transition: filter 120ms ease, opacity 120ms ease;
+        }
+
+        .object-config-card button:hover,
+        .object-config-toolbar button:hover,
+        .state-style-editor button:hover,
+        .floor-config-actions button:hover,
+        .floor-config-add:hover {
+          filter: brightness(1.08);
         }
 
         .object-config-card button[data-remove-object-item],
-        .state-style-row button {
-          border-color: var(--error-color, #db4437);
-          color: var(--error-color, #db4437);
+        .state-style-row button,
+        .floor-config-actions button[data-floor-remove] {
+          background: var(--error-color, #db4437);
+          color: #fff;
         }
 
         .state-style-editor {
@@ -11202,10 +11239,10 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         .floor-config-card {
           display: grid;
           gap: 10px;
-          padding: 10px;
-          border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.25));
-          border-radius: 7px;
-          background: var(--secondary-background-color, #f7f8fa);
+          padding: 16px;
+          border: 1px solid var(--ha-card-border-color, var(--divider-color, rgba(127, 127, 127, 0.25)));
+          border-radius: 8px;
+          background: var(--ha-card-background, var(--card-background-color, transparent));
         }
 
         .floor-config-card header {
@@ -11225,25 +11262,6 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         .floor-config-actions {
           display: flex;
           gap: 6px;
-        }
-
-        .floor-config-actions button,
-        .floor-config-add {
-          width: auto;
-          border: 1px solid var(--primary-color, #03a9f4);
-          border-radius: 6px;
-          background: transparent;
-          color: var(--primary-color, #03a9f4);
-          cursor: pointer;
-          font: inherit;
-          font-size: 12px;
-          font-weight: 700;
-          padding: 6px 10px;
-        }
-
-        .floor-config-actions button[data-floor-remove] {
-          border-color: var(--error-color, #db4437);
-          color: var(--error-color, #db4437);
         }
 
         @media (max-width: 600px) {
