@@ -11426,9 +11426,9 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           </header>
           ${editing ? `
           <div class="editor-grid">
-            <ha-textfield class="editor-field" data-floor-field="id" data-floor-index="${index}" label="ID" value="${this._escape(floor.id || "")}"></ha-textfield>
-            <ha-textfield class="editor-field" data-floor-field="name" data-floor-index="${index}" label="Name" value="${this._escape(floor.name || "")}"></ha-textfield>
-            <ha-textfield class="editor-field" data-floor-field="model" data-floor-index="${index}" label="Model URL" value="${this._escape(floor.model || "")}" placeholder="/local/floorplans/floor.glb"></ha-textfield>
+            <ha-textfield class="editor-field" data-floor-field="id" data-floor-index="${index}" label="ID" type="text" value="${this._escape(floor.id || "")}"></ha-textfield>
+            <ha-textfield class="editor-field" data-floor-field="name" data-floor-index="${index}" label="Name" type="text" value="${this._escape(floor.name || "")}"></ha-textfield>
+            <ha-textfield class="editor-field" data-floor-field="model" data-floor-index="${index}" label="Model URL" type="text" value="${this._escape(floor.model || "")}" placeholder="/local/floorplans/floor.glb"></ha-textfield>
           </div>
           ` : ""}
         </article>
@@ -11575,6 +11575,15 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
   }
 
   _attachEditorEvents() {
+    this.querySelectorAll("ha-textfield").forEach((element) => {
+      if (element.hasAttribute("value")) element.value = element.getAttribute("value") || "";
+    });
+    this.querySelectorAll("ha-select").forEach((element) => {
+      if (element.hasAttribute("value")) element.value = element.getAttribute("value") || "";
+    });
+    this.querySelectorAll("ha-switch").forEach((element) => {
+      element.checked = element.hasAttribute("checked");
+    });
     this.querySelectorAll("[data-floor-edit]").forEach((button) => {
       button.addEventListener("click", () => {
         const index = Number(button.dataset.floorEdit);
@@ -12162,7 +12171,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
   }
 
   _textInput(key, label, placeholder = "") {
-    return `<ha-textfield class="editor-field" data-config-key="${this._escape(key)}" label="${this._escape(label)}" value="${this._escape(this._getConfigPath(key) ?? "")}" placeholder="${this._escape(placeholder)}"></ha-textfield>`;
+    return `<ha-textfield class="editor-field" data-config-key="${this._escape(key)}" label="${this._escape(label)}" type="text" value="${this._escape(this._getConfigPath(key) ?? "")}" placeholder="${this._escape(placeholder)}"></ha-textfield>`;
   }
 
   _numberInput(key, label, fallback = "", min = null, max = null, step = 1) {
@@ -12172,7 +12181,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
 
   _listInput(key, label, fallback = []) {
     const value = this._getConfigPath(key);
-    return `<ha-textfield class="editor-field" data-config-key="${this._escape(key)}" data-config-type="list" label="${this._escape(label)}" value="${this._escape((Array.isArray(value) ? value : fallback).join(", "))}"></ha-textfield>`;
+    return `<ha-textfield class="editor-field" data-config-key="${this._escape(key)}" data-config-type="list" label="${this._escape(label)}" type="text" value="${this._escape((Array.isArray(value) ? value : fallback).join(", "))}"></ha-textfield>`;
   }
 
   _checkboxInput(key, label, fallback = false) {
