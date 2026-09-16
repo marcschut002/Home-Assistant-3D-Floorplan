@@ -6433,7 +6433,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _zoneMesh(THREE, zone, opacity, color = zone.color || "#f8d66d", options = {}) {
-    const points = this._floorSurfacePoints(THREE, zone, options.floorLift);
+    const points = this._floorSurfacePoints(THREE, zone, options.floorLift, options.surfaceSnap !== false);
     const vertices = points.flatMap((point) => [point.x, point.y, point.z]);
     const displayPoints = (zone.points || []).map((point) => this._modelToDisplayPoint(point));
     const axes = this._floorAxes();
@@ -6466,7 +6466,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return this._zoneMesh(THREE, zone, opacity, "#273244", {
       renderOrder: 1.9,
       floorLift: mode === "positional" ? 0.045 : 0.12,
-      surfaceSnap: true,
+      surfaceSnap: false,
     });
   }
 
@@ -6943,7 +6943,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const center = this._zoneCenter(zone);
     if (!center || brightness < 0.01) return null;
 
-    const points = this._floorSurfacePoints(THREE, zone, 0.055);
+    const points = this._floorSurfacePoints(THREE, zone, 0.055, false);
     if (points.length < 3) return null;
 
     // Build triangulated geometry from zone polygon
@@ -7059,9 +7059,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     }));
   }
 
-  _floorSurfacePoints(THREE, zone, lift = 0.025) {
+  _floorSurfacePoints(THREE, zone, lift = 0.025, surfaceSnap = true) {
     const targetLevel = this._zoneFloorLevel(zone);
-    return this._offsetZonePoints(zone.points || [], lift).map((point) => this._surfacePoint(THREE, point, lift, targetLevel));
+    const points = this._offsetZonePoints(zone.points || [], lift, targetLevel);
+    return surfaceSnap ? points.map((point) => this._surfacePoint(THREE, point, lift, targetLevel)) : points;
   }
 
   _surfacePoint(THREE, point, lift = 0.025, targetLevel = null) {
