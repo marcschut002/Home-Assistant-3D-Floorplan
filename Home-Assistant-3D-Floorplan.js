@@ -11081,6 +11081,17 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           box-sizing: border-box;
         }
 
+        .floorplan-editor .textarea-field {
+          display: block;
+          width: 100%;
+          min-width: 0;
+          min-height: 220px;
+        }
+
+        .floorplan-editor .textarea-field ha-textarea {
+          width: 100%;
+        }
+
         .floorplan-editor input,
         .floorplan-editor select,
         .floorplan-editor textarea {
@@ -11377,7 +11388,9 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         <section>
           <h3>Import Config YAML</h3>
           <div class="editor-help">Paste the full output of <strong>Copy YAML</strong> here. Applies markers, zones, animations, interactive objects, presets, and ambient darkness all at once.</div>
-          <ha-textarea class="editor-field" data-full-config-yaml label="Configuration YAML" placeholder="Paste exported YAML here…"></ha-textarea>
+          <div class="textarea-field">
+            <ha-textarea data-full-config-yaml label="Configuration YAML" rows="10" resize="vertical" placeholder="Paste exported YAML here…"></ha-textarea>
+          </div>
           <ha-button data-apply-full-config>Apply</ha-button>
           ${this._fullConfigError ? `<div class="editor-error">${this._escape(this._fullConfigError)}</div>` : ""}
           ${this._fullConfigSuccess ? `<div class="editor-success">${this._escape(this._fullConfigSuccess)}</div>` : ""}
