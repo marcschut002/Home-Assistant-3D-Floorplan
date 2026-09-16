@@ -1501,55 +1501,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           }
           <main>
             <div class="map-toolbar">
-              <div class="toolbar-title">${this._escape(floorTitle)}</div>
-              ${
-                this._hasMultipleFloors()
-                  ? `
-              <label class="floor-switch" title="Floor">
-                <span>Floor</span>
-                <select data-floor>
-                  ${this._floors
-                    .map((floor) => `<option value="${this._escape(floor.id)}" ${floor.id === this._activeFloorId ? "selected" : ""}>${this._escape(floor.name)}</option>`)
-                    .join("")}
-                </select>
-              </label>
-              `
-                  : ""
-              }
-              ${
-                isModelView
-                  ? ""
-                  : `
-              <div class="zoom-controls" aria-label="Map zoom">
-                <span>Zoom</span>
-                <input data-zoom-slider type="range" min="50" max="400" step="10" value="${this._escape(Math.round(this._zoom * 100))}" title="Map zoom" />
-                <output data-zoom-output>${Math.round(this._zoom * 100)}%</output>
-                <button type="button" data-zoom="reset" title="Reset zoom">Reset</button>
-              </div>
-              `
-              }
-              <div class="display-controls" aria-label="Marker display">
-                <div class="marker-size-stepper" title="Marker size">
-                  <span>Size</span>
-                  <button type="button" data-marker-size="down" title="Smaller markers" aria-label="Smaller markers">-</button>
-                  <output data-marker-size-output>${this._escape(this._display.markerSize)}</output>
-                  <button type="button" data-marker-size="up" title="Bigger markers" aria-label="Bigger markers">+</button>
-                </div>
-                <label class="toolbar-toggle" title="Show marker names">
-                  <input data-display="showLabels" type="checkbox" ${this._display.showLabels ? "checked" : ""} />
-                  <span>Names</span>
-                </label>
-              </div>
               ${
                 canEdit
                   ? `
-              ${
-                isEditing
-                  ? `<button type="button" class="sidebar-toggle" data-sidebar-toggle title="${this._sidebarCollapsed ? "Show device sidebar" : "Hide device sidebar"}">
-                ${this._sidebarCollapsed ? "Show Sidebar" : "Hide Sidebar"}
-              </button>`
-                  : ""
-              }
               <div class="mode-switch" aria-label="Map mode">
                 <button type="button" data-mode="user" class="${!isEditing ? "active" : ""}">User Mode</button>
                 <button type="button" data-mode="edit" class="${isEditing ? "active" : ""}">Edit Mode</button>
@@ -1569,7 +1523,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               ${this._modelCompassTemplate()}
               ${isEditing ? `<div class="selected-marker-panel" data-selected-marker-panel>${this._selectedMarkerPanel()}</div>` : ""}
               <div class="model-status" data-model-status>${isEditing ? "Select an entity, then click the 3D model to place it." : "Loading 3D model..."}</div>
-              <div class="version-badge">v${VERSION}</div>
               ${isEditing ? `<canvas class="axes-gizmo" data-axes-gizmo></canvas><div class="axes-legend">${this._axesLegendHTML()}</div>` : ""}
             </div>
             `
@@ -9752,20 +9705,15 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           z-index: 4;
           top: 12px;
           display: flex;
-          flex-wrap: nowrap;
+          justify-content: flex-end;
           align-items: center;
-          gap: 10px;
-          overflow-x: auto;
-          overflow-y: hidden;
-          scrollbar-width: thin;
           width: calc(100% - 24px);
           max-width: calc(100% - 24px);
           margin: 12px;
-          border: 1px solid var(--dmp-border);
-          border-radius: 8px;
-          background: var(--card-background-color, #fff);
-          box-shadow: 0 3px 12px rgba(0, 0, 0, 0.18);
-          padding: 4px;
+          border: 0;
+          background: transparent;
+          box-shadow: none;
+          padding: 0;
         }
 
         .toolbar-title {
@@ -9804,7 +9752,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           flex: 0 0 auto;
           display: flex;
           gap: 4px;
-          margin-left: auto;
         }
 
         .mode-switch button, .sidebar-toggle {
@@ -10412,18 +10359,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
         .model-status[hidden] {
           display: none;
-        }
-
-        .version-badge {
-          position: absolute;
-          bottom: 6px;
-          right: 8px;
-          z-index: 10;
-          font-size: 10px;
-          font-weight: 600;
-          color: rgba(255, 255, 255, 0.35);
-          pointer-events: none;
-          letter-spacing: 0.03em;
         }
 
         /* ── Axes gizmo (edit mode only) ── */
