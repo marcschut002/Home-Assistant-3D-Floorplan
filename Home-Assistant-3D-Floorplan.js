@@ -11303,7 +11303,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <div class="floor-config-list">
             ${this._renderFloorEditors()}
           </div>
-          <button type="button" class="floor-config-add" data-floor-add>Floor toevoegen</button>
+          <ha-button class="floor-config-add" data-floor-add>Floor toevoegen</ha-button>
         </section>
 
         <section>
@@ -11377,8 +11377,8 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         <section>
           <h3>Import Config YAML</h3>
           <div class="editor-help">Paste the full output of <strong>Copy YAML</strong> here. Applies markers, zones, animations, interactive objects, presets, and ambient darkness all at once.</div>
-          <textarea data-full-config-yaml spellcheck="false" placeholder="Paste exported YAML here…"></textarea>
-          <button type="button" data-apply-full-config style="margin-top:6px;padding:5px 12px;border:1px solid var(--primary-color,#03a9f4);border-radius:6px;background:transparent;color:var(--primary-color,#03a9f4);cursor:pointer;font-size:12px;font-weight:700;">Apply</button>
+          <ha-textarea class="editor-field" data-full-config-yaml label="Configuration YAML" placeholder="Paste exported YAML here…"></ha-textarea>
+          <ha-button data-apply-full-config>Apply</ha-button>
           ${this._fullConfigError ? `<div class="editor-error">${this._escape(this._fullConfigError)}</div>` : ""}
           ${this._fullConfigSuccess ? `<div class="editor-success">${this._escape(this._fullConfigSuccess)}</div>` : ""}
         </section>
@@ -11404,7 +11404,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <span>Configuration scope</span>
           <ha-select class="editor-field" data-object-config-scope label="Configuration scope" value="${this._escape(this._objectConfigScope)}">${scopeOptions.map(([value, label]) => `<ha-list-item value="${this._escape(value)}">${this._escape(label)}</ha-list-item>`).join("")}</ha-select>
         </label>
-        <button type="button" data-add-object-item="${kind}">Add ${label}</button>
+        <ha-button data-add-object-item="${kind}">Add ${label}</ha-button>
       </div>
     `;
   }
@@ -11420,15 +11420,15 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <header>
             <strong>${this._escape(label)}</strong>
             <div class="floor-config-actions">
-              <button type="button" data-floor-edit="${index}" aria-label="${editing ? "Stop editing" : "Edit floor"}">${editing ? "Done" : "Edit"}</button>
-              <button type="button" data-floor-remove="${index}" aria-label="Remove floor">Remove</button>
+              <ha-button data-floor-edit="${index}" aria-label="${editing ? "Stop editing" : "Edit floor"}">${editing ? "Done" : "Edit"}</ha-button>
+              <ha-button data-floor-remove="${index}" aria-label="Remove floor">Remove</ha-button>
             </div>
           </header>
           ${editing ? `
           <div class="editor-grid">
-            <ha-textfield class="editor-field" data-floor-field="id" data-floor-index="${index}" label="ID" type="text" value="${this._escape(floor.id || "")}"></ha-textfield>
-            <ha-textfield class="editor-field" data-floor-field="name" data-floor-index="${index}" label="Name" type="text" value="${this._escape(floor.name || "")}"></ha-textfield>
-            <ha-textfield class="editor-field" data-floor-field="model" data-floor-index="${index}" label="Model URL" type="text" value="${this._escape(floor.model || "")}" placeholder="/local/floorplans/floor.glb"></ha-textfield>
+            <ha-input class="editor-field" data-floor-field="id" data-floor-index="${index}" label="ID" type="text" value="${this._escape(floor.id || "")}"></ha-input>
+            <ha-input class="editor-field" data-floor-field="name" data-floor-index="${index}" label="Name" type="text" value="${this._escape(floor.name || "")}"></ha-input>
+            <ha-input class="editor-field" data-floor-field="model" data-floor-index="${index}" label="Model URL" type="text" value="${this._escape(floor.model || "")}" placeholder="/local/floorplans/floor.glb"></ha-input>
           </div>
           ` : ""}
         </article>
@@ -11481,7 +11481,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       <article class="object-config-card">
         <header>
           <strong>Animation ${index + 1}${animation.object_name ? ` · ${this._escape(animation.object_name)}` : ""}</strong>
-          <button type="button" data-remove-object-item="animation" data-item-index="${index}">Remove</button>
+          <ha-button data-remove-object-item="animation" data-item-index="${index}">Remove</ha-button>
         </header>
         <div class="editor-grid">
           ${this._objectField("animation", index, "object_name", "GLB Object Name", animation.object_name, "CeilingFan")}
@@ -11508,7 +11508,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         <article class="object-config-card">
           <header>
             <strong>Interactive object ${index + 1}${object.object_name ? ` · ${this._escape(object.object_name)}` : ""}</strong>
-            <button type="button" data-remove-object-item="interactive" data-item-index="${index}">Remove</button>
+            <ha-button data-remove-object-item="interactive" data-item-index="${index}">Remove</ha-button>
           </header>
           <div class="editor-grid">
             ${this._objectField("interactive", index, "object_name", "GLB Object Name", object.object_name, "CeilingFan")}
@@ -11557,17 +11557,17 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
             ${this._objectField("interactive", index, `state_styles.${styleIndex}.state`, "State", state, "on")}
             ${this._objectField("interactive", index, `state_styles.${styleIndex}.color`, "Color", style?.color, "#81c784")}
             ${this._objectField("interactive", index, `state_styles.${styleIndex}.opacity`, "Opacity", style?.opacity ?? "", "1", "number", 'min="0" max="1" step="0.05"')}
-            <button type="button" data-remove-state-style data-item-index="${index}" data-style-state="${this._escape(state)}">Remove</button>
+            <ha-button data-remove-state-style data-item-index="${index}" data-style-state="${this._escape(state)}">Remove</ha-button>
           </div>
         `).join("")}
         ${entries.length ? "" : `<div class="object-config-empty">No state styles configured.</div>`}
-        <button type="button" data-add-state-style data-item-index="${index}">Add state style</button>
+        <ha-button data-add-state-style data-item-index="${index}">Add state style</ha-button>
       </div>
     `;
   }
 
   _objectField(kind, index, key, label, value = "", placeholder = "", type = "text", attributes = "", valueType = "") {
-    return `<ha-textfield class="editor-field" type="${this._escape(type)}" data-object-kind="${kind}" data-item-index="${index}" data-object-key="${this._escape(key)}" ${valueType ? `data-value-type="${valueType}"` : ""} value="${this._escape(value ?? "")}" label="${this._escape(label)}" placeholder="${this._escape(placeholder)}" ${attributes}></ha-textfield>`;
+    return `<ha-input class="editor-field" type="${this._escape(type)}" data-object-kind="${kind}" data-item-index="${index}" data-object-key="${this._escape(key)}" ${valueType ? `data-value-type="${valueType}"` : ""} value="${this._escape(value ?? "")}" label="${this._escape(label)}" placeholder="${this._escape(placeholder)}" ${attributes}></ha-input>`;
   }
 
   _objectSelect(kind, index, key, label, value, options) {
@@ -11575,7 +11575,10 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
   }
 
   _attachEditorEvents() {
-    this.querySelectorAll("ha-textfield").forEach((element) => {
+    this.querySelectorAll("ha-input").forEach((element) => {
+      if (element.hasAttribute("value")) element.value = element.getAttribute("value") || "";
+    });
+    this.querySelectorAll("ha-textarea").forEach((element) => {
       if (element.hasAttribute("value")) element.value = element.getAttribute("value") || "";
     });
     this.querySelectorAll("ha-select").forEach((element) => {
@@ -12171,17 +12174,17 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
   }
 
   _textInput(key, label, placeholder = "") {
-    return `<ha-textfield class="editor-field" data-config-key="${this._escape(key)}" label="${this._escape(label)}" type="text" value="${this._escape(this._getConfigPath(key) ?? "")}" placeholder="${this._escape(placeholder)}"></ha-textfield>`;
+    return `<ha-input class="editor-field" data-config-key="${this._escape(key)}" label="${this._escape(label)}" type="text" value="${this._escape(this._getConfigPath(key) ?? "")}" placeholder="${this._escape(placeholder)}"></ha-input>`;
   }
 
   _numberInput(key, label, fallback = "", min = null, max = null, step = 1) {
     const value = this._getConfigPath(key);
-    return `<ha-textfield class="editor-field" data-config-key="${this._escape(key)}" data-config-type="number" label="${this._escape(label)}" type="number" ${min === null ? "" : `min="${this._escape(min)}"`} ${max === null ? "" : `max="${this._escape(max)}"`} step="${this._escape(step)}" value="${this._escape(value ?? fallback)}"></ha-textfield>`;
+    return `<ha-input class="editor-field" data-config-key="${this._escape(key)}" data-config-type="number" label="${this._escape(label)}" type="number" ${min === null ? "" : `min="${this._escape(min)}"`} ${max === null ? "" : `max="${this._escape(max)}"`} step="${this._escape(step)}" value="${this._escape(value ?? fallback)}"></ha-input>`;
   }
 
   _listInput(key, label, fallback = []) {
     const value = this._getConfigPath(key);
-    return `<ha-textfield class="editor-field" data-config-key="${this._escape(key)}" data-config-type="list" label="${this._escape(label)}" type="text" value="${this._escape((Array.isArray(value) ? value : fallback).join(", "))}"></ha-textfield>`;
+    return `<ha-input class="editor-field" data-config-key="${this._escape(key)}" data-config-type="list" label="${this._escape(label)}" type="text" value="${this._escape((Array.isArray(value) ? value : fallback).join(", "))}"></ha-input>`;
   }
 
   _checkboxInput(key, label, fallback = false) {
