@@ -4036,7 +4036,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _normalizeMarkerDisplay(value) {
     const display = String(value || "").trim();
-    return ["icon", "value"].includes(display) ? display : "";
+    return ["icon", "value", "hide"].includes(display) ? display : "";
   }
 
   _markerDisplayMode(row) {
@@ -4045,6 +4045,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (override) return override;
     if (row?.primaryDomain === "sensor" && ["temperature", "humidity"].includes(row.primaryDeviceClass)) return "value";
     return "icon";
+  }
+
+  _isMarkerHidden(row) {
+    return this._markerDisplayMode(row) === "hide";
   }
 
   _markerFace(row) {
@@ -4854,6 +4858,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ["auto", "Auto"],
       ["icon", "Icon"],
       ["value", "Value"],
+      ["hide", "Hide"],
     ]
       .map(([value, label]) => `<option value="${this._escape(value)}" ${selected === value ? "selected" : ""}>${this._escape(label)}</option>`)
       .join("");
@@ -4896,6 +4901,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _markerTemplate(row, isEditing) {
+    const hidden = this._isMarkerHidden(row);
+    if (hidden && !isEditing) return "";
     const marker = this._markers[row.key];
     const size = this._display.markerSize;
     const content = this._markerFace(row);
@@ -4910,7 +4917,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const thresholdStyle = thresholdColor ? ` --marker-threshold-color: ${thresholdColor};` : "";
     return `
       <button
-        class="marker ${this._display.showLabels ? "with-label" : "icon-only"} ${content.type === "value" ? "value-marker" : ""} ${this._config.show_entity_state ? "state-mode" : ""} ${stateClass} ${thresholdClass} ${isEditing && this._selectedMarkers.has(row.key) ? "selected" : ""} ${row.offline ? "offline" : "online"}"
+        class="marker ${this._display.showLabels ? "with-label" : "icon-only"} ${content.type === "value" ? "value-marker" : ""} ${hidden ? "marker-hidden" : ""} ${this._config.show_entity_state ? "state-mode" : ""} ${stateClass} ${thresholdClass} ${isEditing && this._selectedMarkers.has(row.key) ? "selected" : ""} ${row.offline ? "offline" : "online"}"
         style="left: ${this._escape(marker.x)}%; top: ${this._escape(marker.y)}%; --marker-size: ${this._escape(size)}px;${thresholdStyle}"
         draggable="${isEditing ? "true" : "false"}"
         data-marker="${this._escape(row.key)}"
@@ -6000,6 +6007,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (!markerLayer) return [];
     markerLayer.innerHTML = "";
     return this._modelMarkerRows().flatMap(({ row, marker }) => {
+      const hidden = this._isMarkerHidden(row);
+      if (hidden && this._mode !== "edit") return [];
       const button = document.createElement("button");
       button.type = "button";
       const stateClass = this._stateClass(row);
@@ -6009,7 +6018,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       const thresholdColor = (!row.offline && thresholds && Number.isFinite(numericState))
         ? this._markerColorFromThresholds(thresholds, numericState)
         : null;
-      button.className = `model-marker ${this._display.showLabels ? "with-label" : "icon-only"} ${content.type === "value" ? "value-marker" : ""} ${stateClass} ${thresholdColor ? "state-threshold" : ""} ${row.offline ? "offline" : "online"}`;
+      button.className = `model-marker ${this._display.showLabels ? "with-label" : "icon-only"} ${content.type === "value" ? "value-marker" : ""} ${hidden ? "marker-hidden" : ""} ${stateClass} ${thresholdColor ? "state-threshold" : ""} ${row.offline ? "offline" : "online"}`;
       button.dataset.marker = row.key;
       button.dataset.entity = row.entityId;
       button.title = `${row.name} - ${row.primaryState}`;
@@ -9071,6 +9080,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           font: inherit;
           font-size: 12px;
           padding: 0 6px;
+        }
+
+        .marker.marker-hidden,
+        .model-marker.marker-hidden {
+          opacity: 0.4;
         }
 
         .marker-display-picker {
