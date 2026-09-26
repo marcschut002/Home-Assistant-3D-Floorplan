@@ -8747,8 +8747,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
         .sidebar-tab-panel {
           min-height: 0;
-          overflow-y: auto;
-          overflow-x: hidden;
+          overflow: scroll;
         }
 
         .markers-panel {
