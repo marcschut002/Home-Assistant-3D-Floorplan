@@ -215,6 +215,26 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return 8;
   }
 
+  getGridOptions() {
+    return {
+      columns: 12,
+      rows: 8,
+      min_columns: 6,
+      min_rows: 4,
+    };
+  }
+
+  // Set by Home Assistant: "grid" in sections view, "panel" in panel view.
+  set layout(value) {
+    this._layout = value;
+    if (value) this.setAttribute("layout", value);
+    else this.removeAttribute("layout");
+  }
+
+  get layout() {
+    return this._layout;
+  }
+
   connectedCallback() {
     window.addEventListener("keydown", this._boundKeydown, { capture: true });
     window.addEventListener("location-changed", this._boundLocationChanged);
@@ -8548,6 +8568,39 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
         .panel.sidebar-collapsed {
           grid-template-columns: 1fr;
+        }
+
+        :host([layout="grid"]),
+        :host([layout="grid"]) ha-card {
+          height: 100%;
+        }
+
+        :host([layout="grid"]) ha-card {
+          overflow: hidden;
+        }
+
+        :host([layout="grid"]) .panel {
+          height: 100%;
+        }
+
+        :host([layout="grid"]) aside {
+          height: 100%;
+        }
+
+        :host([layout="grid"]) main {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          min-height: 0;
+          box-sizing: border-box;
+        }
+
+        :host([layout="grid"]) .model-viewer,
+        :host([layout="grid"]) .map {
+          flex: 1 1 auto;
+          height: auto;
+          max-height: none;
+          min-height: 0;
         }
 
         aside {
