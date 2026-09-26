@@ -5509,8 +5509,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       controls.enablePan = true;
       controls.screenSpacePanning = true;
       if (THREE.TOUCH) {
-        controls.touches.ONE = THREE.TOUCH.ROTATE;
-        controls.touches.TWO = THREE.TOUCH.DOLLY_PAN;
+        controls.touches.ONE = THREE.TOUCH.PAN;
+        controls.touches.TWO = THREE.TOUCH.DOLLY_ROTATE;
       }
 
       // Set camera up-vector to match the model's vertical axis so Top view and
