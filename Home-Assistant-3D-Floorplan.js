@@ -135,6 +135,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       light_presets: {},
       model_background: "",
       model_background_mode: "",
+      model_height: "",
       ambient_darkness: {
         entity: "sun.sun",
         day_opacity: 0.5,
@@ -168,6 +169,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ...config,
     };
     this._floors = this._normalizedFloors(this._config);
+    const modelHeight = String(this._config.model_height || "").trim();
+    if (modelHeight) this.style.setProperty("--hafp-model-height", modelHeight);
+    else this.style.removeProperty("--hafp-model-height");
     const requestedFloorId = this._requestedModelFloorId();
     this._activeFloorId = this._floors.some((floor) => floor.id === requestedFloorId)
       ? requestedFloorId
@@ -8743,7 +8747,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
         .sidebar-tab-panel {
           min-height: 0;
-          overflow: hidden;
+          overflow-y: auto;
+          overflow-x: hidden;
         }
 
         .markers-panel {
@@ -10032,7 +10037,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         .map {
           position: relative;
           width: 100%;
-          max-height: clamp(520px, 82vh, 1100px);
+          max-height: var(--hafp-model-height, clamp(520px, 82vh, 1100px));
           overflow: auto;
           border: 1px solid var(--dmp-border);
           border-radius: 8px;
@@ -10054,7 +10059,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         .model-viewer {
           position: relative;
           width: 100%;
-          height: clamp(520px, 82vh, 1100px);
+          height: var(--hafp-model-height, clamp(520px, 82vh, 1100px));
           overflow: hidden;
           border-radius: var(--ha-card-border-radius, 12px);
           background: #111827;
@@ -11382,7 +11387,9 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
             ${this._textInput("model", "3D Model URL", "/local/floorplans/home.glb")}
             ${this._textInput("model_background", "Model Background", "#111827")}
             ${this._selectInput("model_background_mode", "Model Background Mode", [["", "Use background color"], ["transparent", "Transparent"]])}
+            ${this._textInput("model_height", "Model Height", "clamp(520px, 82vh, 1100px)")}
           </div>
+          <div class="editor-help">Model Height accepts any CSS height (e.g. 700px, 80vh). In a sections view the grid height from the Layout tab is used instead.</div>
         </section>
 
         <section>
@@ -11951,6 +11958,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       "areas",
       "coordinate_map",
       "model_background_mode",
+      "model_height",
       "model_performance_profile",
       "performance_profile",
       "model_antialias",
