@@ -165,6 +165,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       marker_size: 18,
       show_labels: true,
       show_entity_state: true,
+      marker_color: "#1d8f5f",
       nudge_step: 1,
       ...config,
     };
@@ -4924,6 +4925,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return /^#[0-9a-f]{6}$/i.test(text) ? text : "#66bb6a";
   }
 
+  _defaultMarkerColor() {
+    const color = String(this._config.marker_color || "").trim();
+    return /^#[0-9a-f]{6}$/i.test(color) ? color : "#1d8f5f";
+  }
+
   _markerTemplate(row, isEditing) {
     const hidden = this._isMarkerHidden(row);
     if (hidden && !isEditing) return "";
@@ -4942,7 +4948,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return `
       <button
         class="marker ${this._display.showLabels ? "with-label" : "icon-only"} ${content.type === "value" ? "value-marker" : ""} ${hidden ? "marker-hidden" : ""} ${this._config.show_entity_state ? "state-mode" : ""} ${stateClass} ${thresholdClass} ${isEditing && this._selectedMarkers.has(row.key) ? "selected" : ""} ${row.offline ? "offline" : "online"}"
-        style="left: ${this._escape(marker.x)}%; top: ${this._escape(marker.y)}%; --marker-size: ${this._escape(size)}px;${thresholdStyle}"
+        style="left: ${this._escape(marker.x)}%; top: ${this._escape(marker.y)}%; --marker-size: ${this._escape(size)}px; --marker-default-color: ${this._defaultMarkerColor()};${thresholdStyle}"
         draggable="${isEditing ? "true" : "false"}"
         data-marker="${this._escape(row.key)}"
         data-entity="${this._escape(row.entityId)}"
@@ -6047,6 +6053,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       button.dataset.entity = row.entityId;
       button.title = `${row.name} - ${row.primaryState}`;
       button.style.setProperty("--marker-size", `${this._display.markerSize}px`);
+      button.style.setProperty("--marker-default-color", this._defaultMarkerColor());
       if (thresholdColor) button.style.setProperty("--marker-threshold-color", thresholdColor);
       button.innerHTML = `
         <span class="${content.type === "value" ? "value-face" : ""}">${content.type === "value" ? this._escape(content.value) : `<ha-icon icon="${this._escape(content.icon)}"></ha-icon>`}</span>
@@ -10316,9 +10323,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           color: #fff;
         }
 
-        .model-marker.state-neutral span,
-        .model-marker.state-online span {
+        .model-marker.state-neutral span {
           background: var(--dmp-good);
+          color: #fff;
+        }
+
+        .model-marker.state-online span {
+          background: var(--marker-default-color, var(--dmp-good));
           color: #fff;
         }
 
@@ -10873,7 +10884,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           min-width: var(--marker-size);
           min-height: var(--marker-size);
           border-radius: 50%;
-          box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.85), 0 0 13px rgba(29, 143, 95, 0.78);
+          box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.85), 0 0 13px color-mix(in srgb, var(--marker-default-color, #1d8f5f) 78%, transparent);
           line-height: 0;
         }
 
@@ -10896,7 +10907,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         }
 
         .marker.online span {
-          background: var(--dmp-good);
+          background: var(--marker-default-color, var(--dmp-good));
         }
 
         .marker.offline span {
@@ -11134,6 +11145,12 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           display: grid;
           grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
           gap: 10px;
+        }
+
+        .floorplan-editor .marker-color-input {
+          min-height: 48px;
+          padding: 5px;
+          cursor: pointer;
         }
 
         .floorplan-editor label {
@@ -11416,6 +11433,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
             ${this._checkboxInput("show_navigation_buttons", "Show 3D Navigation Buttons", true)}
             ${this._checkboxInput("show_labels", "Show Marker Names", true)}
             ${this._checkboxInput("show_entity_state", "Use Entity State Colors", true)}
+            ${this._colorInput("marker_color", "Icon Color (State Colors Off)", "#1d8f5f")}
             ${this._numberInput("marker_size", "Marker Size", 18, 8, 64, 1)}
             ${this._numberInput("nudge_step", "Nudge Step", 1, 0.01, 100, 0.01)}
           </div>
@@ -11943,6 +11961,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       "show_navigation_buttons",
       "show_labels",
       "show_entity_state",
+      "marker_color",
       "marker_size",
       "nudge_step",
       "marker_tap_action",
@@ -12282,6 +12301,12 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
 
   _textInput(key, label, placeholder = "") {
     return `<ha-input class="editor-field" data-config-key="${this._escape(key)}" label="${this._escape(label)}" type="text" value="${this._escape(this._getConfigPath(key) ?? "")}" placeholder="${this._escape(placeholder)}"></ha-input>`;
+  }
+
+  _colorInput(key, label, fallback) {
+    const value = this._getConfigPath(key) ?? fallback;
+    const color = /^#[0-9a-f]{6}$/i.test(String(value)) ? value : fallback;
+    return `<label><span>${this._escape(label)}</span><input class="marker-color-input" data-config-key="${this._escape(key)}" type="color" value="${this._escape(color)}" /></label>`;
   }
 
   _numberInput(key, label, fallback = "", min = null, max = null, step = 1) {
