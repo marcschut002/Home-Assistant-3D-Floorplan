@@ -192,9 +192,11 @@ views:
     target: [0.0000, 0.8000, 0.0000]
     icon: mdi:silverware-fork-knife
     icon_position: [1.2000, 1.0000, -0.5000]   # optional, defaults to target
+    icon_color: "#ff9800"                       # optional, defaults to the theme primary color
 ```
 
-In the **Views** tab, choose a **View icon**, then use **Pick on Model** to click
+In the **Views** tab, choose a **View icon** and optionally an **Icon color**
+(**Theme Color** resets it), then use **Pick on Model** to click
 where the icon should appear, or **Use Target** to place it at the view target.
 Press **Save View** to keep the icon.
 

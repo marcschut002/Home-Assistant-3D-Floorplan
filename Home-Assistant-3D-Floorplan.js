@@ -89,7 +89,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._modelCameraState = null;
     this._modelDefaultViews = {};
     this._modelViews = {};
-    this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [] };
+    this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "" };
     this._activeRequestedModelView = "";
     this._activeModelView = "default";
     this._leavingViewIcon = "";
@@ -438,6 +438,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       const icon = stateObj.attributes?.icon || "";
       const deviceClass = stateObj.attributes?.device_class || "";
       const unit = stateObj.attributes?.unit_of_measurement || "";
+      const rgbColor = stateObj.attributes?.rgb_color;
 
       rows.push({
         key: entityId,
@@ -457,6 +458,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         unit,
         primaryDomain: domain,
         primaryDeviceClass: deviceClass,
+        rgbColor: Array.isArray(rgbColor) && rgbColor.length >= 3 ? rgbColor.slice(0, 3).map(Number) : null,
         offlineEntities: isOffline ? [{ entityId, name }] : [],
         entityCount: 1,
         areaId,
@@ -481,15 +483,29 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _stateClass(row) {
     if (row.offline) return "state-offline";
     if (!this._config.show_entity_state) return "state-online";
+    return `state-${this._entityStateKind(row)}`;
+  }
+
+  _entityStateKind(row) {
     const state = String(row.primaryState || "").toLowerCase();
     const activeStates = ["on", "open", "opening", "unlocked", "detected", "motion", "home", "playing", "heat", "cool", "heating", "cooling", "active", "running"];
     const inactiveStates = ["off", "closed", "closing", "locked", "clear", "none", "not_home", "idle", "standby", "paused", "stopped"];
 
-    if (activeStates.includes(state)) return "state-active";
-    if (inactiveStates.includes(state)) return "state-inactive";
-    if (row.primaryDomain === "binary_sensor") return state === "on" ? "state-active" : "state-inactive";
-    if (row.primaryDomain === "light" || row.primaryDomain === "switch") return state === "on" ? "state-active" : "state-inactive";
-    return "state-neutral";
+    if (activeStates.includes(state)) return "active";
+    if (inactiveStates.includes(state)) return "inactive";
+    if (row.primaryDomain === "binary_sensor") return state === "on" ? "active" : "inactive";
+    if (row.primaryDomain === "light" || row.primaryDomain === "switch") return state === "on" ? "active" : "inactive";
+    return "neutral";
+  }
+
+  // Icon color for an active entity when state colors are off, like Home Assistant tiles:
+  // a light uses its own color, anything else its domain's active color.
+  _markerActiveIconColor(row) {
+    if (row.offline || this._config.show_entity_state || this._entityStateKind(row) !== "active") return "";
+    const rgb = row.rgbColor;
+    if (rgb?.every(Number.isFinite)) return `rgb(${rgb.join(", ")})`;
+    const domain = /^[a-z0-9_]+$/.test(row.primaryDomain || "") ? row.primaryDomain : "";
+    return `var(--state-${domain}-active-color, var(--state-active-color, #ffc107))`;
   }
 
   /**
@@ -1238,6 +1254,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const far = Number(view.far);
     const icon = String(view.icon || "").trim();
     const iconPosition = this._numberArray(view.icon_position || view.iconPosition, 3);
+    const iconColor = this._normalizeHexColor(view.icon_color || view.iconColor);
     return {
       position,
       target,
@@ -1246,7 +1263,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ...(Number.isFinite(far) && far > 0 ? { far } : {}),
       ...(icon ? { icon } : {}),
       ...(icon && iconPosition ? { icon_position: iconPosition } : {}),
+      ...(icon && iconColor ? { icon_color: iconColor } : {}),
     };
+  }
+
+  _normalizeHexColor(value) {
+    const color = String(value || "").trim();
+    return /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : "";
   }
 
   _numberArray(value, length) {
@@ -2878,7 +2901,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _modelViewToolsTemplate() {
     const floorViews = this._modelViews?.[this._activeFloorId || "default"] || {};
-    const draft = this._modelViewDraft || { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [] };
+    const draft = this._modelViewDraft || { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "" };
     const value = (items, index) => items?.[index] ?? "";
     return `
       <label>
@@ -2910,6 +2933,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         <ha-icon-picker data-view-icon value="${this._escape(draft.icon || "")}"></ha-icon-picker>
       </label>
       ${draft.icon ? `
+      <div class="view-icon-color">
+        <label>
+          <span>Icon color</span>
+          <input data-view-icon-color type="color" value="${this._escape(draft.iconColor || "#03a9f4")}" />
+        </label>
+        <button type="button" data-view-icon-color-clear ${draft.iconColor ? "" : "disabled"}>Theme Color</button>
+      </div>
       <div class="view-coordinate-grid">
         <strong>Icon position</strong>
         ${[0, 1, 2].map((index) => `
@@ -2965,7 +2995,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     });
     root?.querySelectorAll("[data-view-clear]").forEach((element) => {
       element.addEventListener("click", () => {
-        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [] };
+        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "" };
         this._pendingViewIconPick = false;
         this._refreshModelViewTools();
       });
@@ -2975,7 +3005,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         const name = event.currentTarget.dataset.viewSelect;
         const view = this._modelViews?.[this._activeFloorId || "default"]?.[name];
         if (!view) return;
-        this._modelViewDraft = { name, position: [...view.position], target: [...view.target], zoom: view.zoom || 1, icon: view.icon || "", iconPosition: [...(view.icon_position || [])] };
+        this._modelViewDraft = { name, position: [...view.position], target: [...view.target], zoom: view.zoom || 1, icon: view.icon || "", iconPosition: [...(view.icon_position || [])], iconColor: view.icon_color || "" };
         this._pendingViewIconPick = false;
         this._refreshModelViewTools();
       });
@@ -2988,7 +3018,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         const name = event.currentTarget.dataset.viewRemove;
         delete this._modelViews[this._activeFloorId || "default"]?.[name];
         this._saveModelViews();
-        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [] };
+        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "" };
         this._refreshModelViewTools();
         this._refresh3DMarkerOverlay();
       });
@@ -3002,6 +3032,18 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         if (icon === (this._modelViewDraft.icon || "")) return;
         this._modelViewDraft = { ...this._modelViewDraft, icon };
         if (!icon) this._pendingViewIconPick = false;
+        this._refreshModelViewTools();
+      });
+    });
+    root?.querySelectorAll("[data-view-icon-color]").forEach((element) => {
+      element.addEventListener("change", (event) => {
+        this._modelViewDraft = { ...this._modelViewDraft, iconColor: this._normalizeHexColor(event.currentTarget.value) };
+        this._refreshModelViewTools();
+      });
+    });
+    root?.querySelectorAll("[data-view-icon-color-clear]").forEach((element) => {
+      element.addEventListener("click", () => {
+        this._modelViewDraft = { ...this._modelViewDraft, iconColor: "" };
         this._refreshModelViewTools();
       });
     });
@@ -3058,14 +3100,16 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._modelViews[floorId] = this._modelViews[floorId] || {};
     const icon = String(this._modelViewDraft?.icon || "").trim();
     const iconPosition = icon ? this._numberArray(this._modelViewDraft?.iconPosition, 3) : null;
+    const iconColor = icon ? this._normalizeHexColor(this._modelViewDraft?.iconColor) : "";
     this._modelViews[floorId][name] = {
       position,
       target,
       zoom,
       ...(icon ? { icon } : {}),
       ...(iconPosition ? { icon_position: iconPosition } : {}),
+      ...(iconColor ? { icon_color: iconColor } : {}),
     };
-    this._modelViewDraft = { name, position, target, zoom, icon, iconPosition: iconPosition || [] };
+    this._modelViewDraft = { name, position, target, zoom, icon, iconPosition: iconPosition || [], iconColor };
     this._pendingViewIconPick = false;
     this._saveModelViews();
     this._refreshModelViewTools();
@@ -5080,10 +5124,12 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       : null;
     const thresholdClass = thresholdColor ? "state-threshold" : "";
     const thresholdStyle = thresholdColor ? ` --marker-threshold-color: ${thresholdColor};` : "";
+    const activeIconColor = thresholdColor ? "" : this._markerActiveIconColor(row);
+    const activeIconStyle = activeIconColor ? ` --marker-active-icon-color: ${activeIconColor};` : "";
     return `
       <button
-        class="marker ${this._display.showLabels ? "with-label" : "icon-only"} ${content.type === "value" ? "value-marker" : ""} ${hidden ? "marker-hidden" : ""} ${this._config.show_entity_state ? "state-mode" : ""} ${stateClass} ${thresholdClass} ${isEditing && this._selectedMarkers.has(row.key) ? "selected" : ""} ${row.offline ? "offline" : "online"}"
-        style="left: ${this._escape(marker.x)}%; top: ${this._escape(marker.y)}%; --marker-size: ${this._escape(size)}px; --marker-default-color: ${this._defaultMarkerColor()};${thresholdStyle}"
+        class="marker ${this._display.showLabels ? "with-label" : "icon-only"} ${content.type === "value" ? "value-marker" : ""} ${hidden ? "marker-hidden" : ""} ${this._config.show_entity_state ? "state-mode" : ""} ${stateClass} ${thresholdClass} ${activeIconColor ? "state-on" : ""} ${isEditing && this._selectedMarkers.has(row.key) ? "selected" : ""} ${row.offline ? "offline" : "online"}"
+        style="left: ${this._escape(marker.x)}%; top: ${this._escape(marker.y)}%; --marker-size: ${this._escape(size)}px; --marker-default-color: ${this._defaultMarkerColor()};${thresholdStyle}${activeIconStyle}"
         draggable="${isEditing ? "true" : "false"}"
         data-marker="${this._escape(row.key)}"
         data-entity="${this._escape(row.entityId)}"
@@ -5375,6 +5421,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         ...(Number.isFinite(view.zoom) ? [`${indent}    zoom: ${Number(view.zoom).toFixed(4)}`] : []),
         ...(view.icon ? [`${indent}    icon: ${view.icon}`] : []),
         ...(view.icon_position ? [`${indent}    icon_position: ${formatArray(view.icon_position)}`] : []),
+        ...(view.icon_color ? [`${indent}    icon_color: "${view.icon_color}"`] : []),
       ]),
     ];
   }
@@ -6199,6 +6246,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       button.style.setProperty("--marker-size", `${this._display.markerSize}px`);
       button.style.setProperty("--marker-default-color", this._defaultMarkerColor());
       if (thresholdColor) button.style.setProperty("--marker-threshold-color", thresholdColor);
+      const activeIconColor = thresholdColor ? "" : this._markerActiveIconColor(row);
+      if (activeIconColor) {
+        button.classList.add("state-on");
+        button.style.setProperty("--marker-active-icon-color", activeIconColor);
+      }
       button.innerHTML = `
         <span class="${content.type === "value" ? "value-face" : ""}">${content.type === "value" ? this._escape(content.value) : `<ha-icon icon="${this._escape(content.icon)}"></ha-icon>`}</span>
         ${this._display.showLabels ? `<strong>${this._escape(row.name)}</strong>` : ""}
@@ -6267,6 +6319,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       button.type = "button";
       button.className = `model-marker view-marker ${this._display.showLabels ? "with-label" : "icon-only"} ${leaving ? "leaving" : ""}`;
       button.dataset.viewMarker = name;
+      if (view.icon_color) button.style.setProperty("--view-marker-color", view.icon_color);
       button.title = name;
       button.style.setProperty("--marker-size", `${this._display.markerSize}px`);
       button.style.setProperty("--marker-default-color", this._defaultMarkerColor());
@@ -9342,6 +9395,23 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           opacity: 0.4;
         }
 
+        .view-icon-color {
+          display: flex;
+          align-items: end;
+          gap: 8px;
+        }
+
+        .view-icon-color label {
+          flex: 1;
+        }
+
+        .view-icon-color input[type="color"] {
+          width: 100%;
+          min-height: 36px;
+          padding: 2px;
+          cursor: pointer;
+        }
+
         .marker-views-picker {
           grid-column: 1 / 4;
           display: grid;
@@ -10560,8 +10630,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           color: #fff;
         }
 
+        .marker.state-on span,
+        .model-marker.state-on span {
+          color: var(--marker-active-icon-color);
+        }
+
         .model-marker.view-marker span {
-          background: var(--primary-color, #03a9f4);
+          background: var(--view-marker-color, var(--primary-color, #03a9f4));
           color: #fff;
         }
 
