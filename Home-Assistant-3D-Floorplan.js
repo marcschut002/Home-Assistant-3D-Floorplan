@@ -89,8 +89,12 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._modelCameraState = null;
     this._modelDefaultViews = {};
     this._modelViews = {};
-    this._modelViewDraft = { name: "", position: [], target: [], zoom: 1 };
+    this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [] };
     this._activeRequestedModelView = "";
+    this._activeModelView = "default";
+    this._leavingViewIcon = "";
+    this._leavingViewIconTimer = 0;
+    this._pendingViewIconPick = false;
     this._modelViewAnimation = 0;
     this._modelLoadingUrl = "";
     this._modelLoadFailedUrl = "";
@@ -182,6 +186,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._modelDefaultViews = this._mergedModelDefaultViews(this._configModelDefaultViews(), this._loadModelDefaultViews());
     this._modelViews = this._mergedModelViews(this._configModelViews(), this._loadModelViews());
     this._activeRequestedModelView = "";
+    this._activeModelView = "default";
     this._display = this._normalizedDisplay({
       markerSize: this._config.marker_size,
       showLabels: this._config.show_labels,
@@ -696,6 +701,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         name: marker.name || "",
         icon: marker.icon || "",
         markerDisplay: this._normalizeMarkerDisplay(marker.marker_display || marker.markerDisplay),
+        visibleInViews: this._normalizeViewNames(marker.visible_in_views || marker.visibleInViews),
         tapAction: this._normalizeMarkerAction(marker.tap_action || marker.tapAction, "tap"),
         holdAction: this._normalizeMarkerAction(marker.hold_action || marker.holdAction, "hold"),
         navigationPath: this._normalizeNavigationPath(marker.navigation_path || marker.navigationPath),
@@ -735,6 +741,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         name: marker.name || "",
         icon: marker.icon || "",
         markerDisplay: this._normalizeMarkerDisplay(marker.markerDisplay || marker.marker_display),
+        visibleInViews: this._normalizeViewNames(marker.visibleInViews || marker.visible_in_views),
         tapAction: this._normalizeMarkerAction(marker.tapAction || marker.tap_action, "tap"),
         holdAction: this._normalizeMarkerAction(marker.holdAction || marker.hold_action, "hold"),
         navigationPath: this._normalizeNavigationPath(marker.navigationPath || marker.navigation_path),
@@ -1229,12 +1236,16 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const zoom = Number(view.zoom);
     const near = Number(view.near);
     const far = Number(view.far);
+    const icon = String(view.icon || "").trim();
+    const iconPosition = this._numberArray(view.icon_position || view.iconPosition, 3);
     return {
       position,
       target,
       ...(Number.isFinite(zoom) && zoom > 0 ? { zoom } : {}),
       ...(Number.isFinite(near) && near > 0 ? { near } : {}),
       ...(Number.isFinite(far) && far > 0 ? { far } : {}),
+      ...(icon ? { icon } : {}),
+      ...(icon && iconPosition ? { icon_position: iconPosition } : {}),
     };
   }
 
@@ -2654,6 +2665,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._selectedMarkers.clear();
     this._selectionBox = null;
     this._activeRequestedModelView = "";
+    this._activeModelView = "default";
     this._mapScroll = { left: 0, top: 0, leftRatio: 0, topRatio: 0 };
     this._render();
     return true;
@@ -2866,7 +2878,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _modelViewToolsTemplate() {
     const floorViews = this._modelViews?.[this._activeFloorId || "default"] || {};
-    const draft = this._modelViewDraft || { name: "", position: [], target: [], zoom: 1 };
+    const draft = this._modelViewDraft || { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [] };
     const value = (items, index) => items?.[index] ?? "";
     return `
       <label>
@@ -2893,6 +2905,23 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         <span>Zoom</span>
         <input data-view-zoom type="number" min="0.01" step="0.01" value="${this._escape(draft.zoom ?? 1)}" />
       </label>
+      <label class="view-icon-picker">
+        <span>View icon</span>
+        <ha-icon-picker data-view-icon value="${this._escape(draft.icon || "")}"></ha-icon-picker>
+      </label>
+      ${draft.icon ? `
+      <div class="view-coordinate-grid">
+        <strong>Icon position</strong>
+        ${[0, 1, 2].map((index) => `
+        <label>
+          <span>${["X", "Y", "Z"][index]}</span>
+          <input data-view-icon-position="${index}" type="number" step="0.0001" value="${this._escape(value(draft.iconPosition, index))}" placeholder="${this._escape(value(draft.target, index))}" />
+        </label>`).join("")}
+      </div>
+      <div class="view-actions">
+        <button type="button" data-view-icon-pick class="${this._pendingViewIconPick ? "active" : ""}">${this._pendingViewIconPick ? "Click model…" : "Pick on Model"}</button>
+        <button type="button" data-view-icon-position-clear>Use Target</button>
+      </div>` : ""}
       <div class="view-actions">
         <button type="button" data-view-save>Save View</button>
         <button type="button" data-view-clear>Clear Form</button>
@@ -2900,7 +2929,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       <div class="saved-view-list">
         ${Object.keys(floorViews).sort((a, b) => a.localeCompare(b)).map((name) => `
           <div class="saved-view-row">
-            <button type="button" data-view-select="${this._escape(name)}">${this._escape(name)}</button>
+            <button type="button" data-view-select="${this._escape(name)}">${floorViews[name]?.icon ? `<ha-icon icon="${this._escape(floorViews[name].icon)}"></ha-icon> ` : ""}${this._escape(name)}</button>
             <button type="button" data-view-go="${this._escape(name)}" title="Go to view">Go</button>
             <button type="button" data-view-remove="${this._escape(name)}" title="Remove view">Remove</button>
           </div>
@@ -2936,7 +2965,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     });
     root?.querySelectorAll("[data-view-clear]").forEach((element) => {
       element.addEventListener("click", () => {
-        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1 };
+        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [] };
+        this._pendingViewIconPick = false;
         this._refreshModelViewTools();
       });
     });
@@ -2945,7 +2975,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         const name = event.currentTarget.dataset.viewSelect;
         const view = this._modelViews?.[this._activeFloorId || "default"]?.[name];
         if (!view) return;
-        this._modelViewDraft = { name, position: [...view.position], target: [...view.target], zoom: view.zoom || 1 };
+        this._modelViewDraft = { name, position: [...view.position], target: [...view.target], zoom: view.zoom || 1, icon: view.icon || "", iconPosition: [...(view.icon_position || [])] };
+        this._pendingViewIconPick = false;
         this._refreshModelViewTools();
       });
     });
@@ -2957,13 +2988,48 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         const name = event.currentTarget.dataset.viewRemove;
         delete this._modelViews[this._activeFloorId || "default"]?.[name];
         this._saveModelViews();
-        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1 };
+        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [] };
+        this._refreshModelViewTools();
+        this._refresh3DMarkerOverlay();
+      });
+    });
+    root?.querySelectorAll("[data-view-name], [data-view-position], [data-view-target], [data-view-zoom], [data-view-icon-position]").forEach((element) => {
+      element.addEventListener("input", (event) => this._updateModelViewDraft(event.currentTarget));
+    });
+    root?.querySelectorAll("[data-view-icon]").forEach((element) => {
+      element.addEventListener("value-changed", (event) => {
+        const icon = String(event.detail?.value ?? event.currentTarget.value ?? "").trim();
+        if (icon === (this._modelViewDraft.icon || "")) return;
+        this._modelViewDraft = { ...this._modelViewDraft, icon };
+        if (!icon) this._pendingViewIconPick = false;
         this._refreshModelViewTools();
       });
     });
-    root?.querySelectorAll("[data-view-name], [data-view-position], [data-view-target], [data-view-zoom]").forEach((element) => {
-      element.addEventListener("input", (event) => this._updateModelViewDraft(event.currentTarget));
+    root?.querySelectorAll("[data-view-icon-pick]").forEach((element) => {
+      element.addEventListener("click", () => {
+        this._pendingViewIconPick = !this._pendingViewIconPick;
+        if (this._pendingViewIconPick) {
+          this._pendingDeviceKey = null;
+          this._pendingSubSpot = null;
+          this._pendingLightPath = null;
+        }
+        this._refreshModelViewTools();
+      });
     });
+    root?.querySelectorAll("[data-view-icon-position-clear]").forEach((element) => {
+      element.addEventListener("click", () => {
+        this._modelViewDraft = { ...this._modelViewDraft, iconPosition: [] };
+        this._pendingViewIconPick = false;
+        this._refreshModelViewTools();
+      });
+    });
+  }
+
+  _placeViewIcon(point) {
+    this._pendingViewIconPick = false;
+    this._modelViewDraft = { ...this._modelViewDraft, iconPosition: point.toArray().map((number) => Number(number.toFixed(4))) };
+    this._refreshModelViewTools();
+    this._showModelStatus("Icon position set. Save the view to keep it.");
   }
 
   _updateModelViewDraft(element) {
@@ -2972,6 +3038,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (element.dataset.viewPosition !== undefined) draft.position = this._updateViewCoordinate(draft.position, element.dataset.viewPosition, element.value);
     if (element.dataset.viewTarget !== undefined) draft.target = this._updateViewCoordinate(draft.target, element.dataset.viewTarget, element.value);
     if (element.dataset.viewZoom !== undefined) draft.zoom = element.value;
+    if (element.dataset.viewIconPosition !== undefined) draft.iconPosition = this._updateViewCoordinate(draft.iconPosition, element.dataset.viewIconPosition, element.value);
     this._modelViewDraft = draft;
   }
 
@@ -2989,11 +3056,21 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (!name || !position || !target || !Number.isFinite(zoom) || zoom <= 0) return;
     const floorId = this._activeFloorId || "default";
     this._modelViews[floorId] = this._modelViews[floorId] || {};
-    this._modelViews[floorId][name] = { position, target, zoom };
-    this._modelViewDraft = { name, position, target, zoom };
+    const icon = String(this._modelViewDraft?.icon || "").trim();
+    const iconPosition = icon ? this._numberArray(this._modelViewDraft?.iconPosition, 3) : null;
+    this._modelViews[floorId][name] = {
+      position,
+      target,
+      zoom,
+      ...(icon ? { icon } : {}),
+      ...(iconPosition ? { icon_position: iconPosition } : {}),
+    };
+    this._modelViewDraft = { name, position, target, zoom, icon, iconPosition: iconPosition || [] };
+    this._pendingViewIconPick = false;
     this._saveModelViews();
     this._refreshModelViewTools();
     this._refreshModelCompass();
+    this._refresh3DMarkerOverlay();
   }
 
   _ambientDarknessTemplate() {
@@ -3393,6 +3470,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _setModelView(viewName) {
     const viewer = this._modelViewer;
     if (!viewer?.THREE || !viewer?.camera || !viewer?.controls) return;
+    this._setActiveModelView(viewName);
     const namedView = this._modelViews?.[this._activeFloorId || "default"]?.[viewName];
     if (namedView) {
       this._animateModelCameraView(namedView, viewer.camera, viewer.controls);
@@ -3416,6 +3494,24 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       near: camera.near,
       far: camera.far,
     }, camera, controls);
+  }
+
+  // The active view only changes when a view is chosen; orbiting the camera keeps it.
+  _setActiveModelView(name) {
+    const viewName = String(name || "");
+    if (viewName === this._activeModelView) return;
+    this._activeModelView = viewName;
+    this._refresh3DMarkerOverlay();
+  }
+
+  _goToViewFromIcon(name) {
+    window.clearTimeout(this._leavingViewIconTimer);
+    this._leavingViewIcon = name;
+    this._setModelView(name);
+    this._leavingViewIconTimer = window.setTimeout(() => {
+      this._leavingViewIcon = "";
+      this._refresh3DMarkerOverlay();
+    }, 1000);
   }
 
   _requestedModelViewName() {
@@ -3455,6 +3551,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const view = this._modelViews?.[this._activeFloorId || "default"]?.[name];
     if (!view || !this._modelViewer?.camera || !this._modelViewer?.controls) return false;
     this._activeRequestedModelView = name;
+    this._setActiveModelView(name);
     return this._animateModelCameraView(view, this._modelViewer.camera, this._modelViewer.controls);
   }
 
@@ -4076,6 +4173,16 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return this._markerDisplayMode(row) === "hide";
   }
 
+  _normalizeViewNames(value) {
+    const names = Array.isArray(value) ? value : String(value ?? "").split(",");
+    return [...new Set(names.map((name) => String(name ?? "").trim()).filter(Boolean))];
+  }
+
+  _isMarkerOutsideActiveView(row) {
+    const views = this._markers[row?.key]?.visibleInViews;
+    return Array.isArray(views) && views.length > 0 && !views.includes(this._activeModelView);
+  }
+
   _markerFace(row) {
     if (this._markerDisplayMode(row) === "value") {
       return { type: "value", value: this._formatMarkerValue(row) };
@@ -4356,6 +4463,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       </div>
       ${row ? this._iconSelect(row) : ""}
       ${row ? this._markerDisplayEditor(row) : ""}
+      ${row ? this._markerViewsEditor(row) : ""}
       ${row ? this._colorThresholdEditor(row) : ""}
       ${row ? this._actionEditor(row) : ""}
       ${row ? this._lightIntensityEditor(row) : ""}
@@ -4467,6 +4575,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       element.addEventListener("pointerdown", (event) => event.stopPropagation());
       element.addEventListener("change", (event) => {
         this._updateMarkerDisplay(event.currentTarget.dataset.markerDisplay, event.currentTarget.value);
+      });
+    });
+
+    rowElement.querySelectorAll("[data-marker-view]").forEach((element) => {
+      element.addEventListener("pointerdown", (event) => event.stopPropagation());
+      element.addEventListener("change", (event) => {
+        this._updateMarkerViewVisibility(event.currentTarget.dataset.markerView, event.currentTarget.value, event.currentTarget.checked);
       });
     });
 
@@ -4895,6 +5010,26 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     `;
   }
 
+  _markerViewsEditor(row) {
+    const viewNames = Object.keys(this._modelViews?.[this._activeFloorId || "default"] || {}).sort((a, b) => a.localeCompare(b));
+    if (!viewNames.length) return "";
+    const selected = this._markers[row.key]?.visibleInViews || [];
+    const options = ["default", ...viewNames.filter((name) => name !== "default")]
+      .map((name) => `
+        <label>
+          <input type="checkbox" data-marker-view="${this._escape(row.key)}" value="${this._escape(name)}" ${selected.includes(name) ? "checked" : ""} />
+          <span>${this._escape(name === "default" ? "Home" : name)}</span>
+        </label>
+      `)
+      .join("");
+    return `
+      <div class="marker-views-picker">
+        <span>Visible in views <small>(none = always)</small></span>
+        <div class="marker-views-options">${options}</div>
+      </div>
+    `;
+  }
+
   _colorThresholdEditor(row) {
     const marker = this._markers[row.key] || {};
     const thresholds = this._normalizeColorThresholds(marker.colorThresholds || marker.color_thresholds) || [];
@@ -5048,6 +5183,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
                     `        coordinate_space: display`,
                     ...(marker.icon ? [`        icon: ${marker.icon}`] : []),
                     ...(marker.markerDisplay ? [`        marker_display: ${marker.markerDisplay}`] : []),
+                    ...(marker.visibleInViews.length ? [`        visible_in_views: ${JSON.stringify(marker.visibleInViews)}`] : []),
                     `        tap_action: ${marker.tapAction}`,
                     `        hold_action: ${marker.holdAction}`,
                     ...(marker.navigationPath ? [`        navigation_path: ${JSON.stringify(marker.navigationPath)}`] : []),
@@ -5120,6 +5256,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               `    coordinate_space: display`,
               ...(marker.icon ? [`    icon: ${marker.icon}`] : []),
               ...(marker.markerDisplay ? [`    marker_display: ${marker.markerDisplay}`] : []),
+              ...(marker.visibleInViews.length ? [`    visible_in_views: ${JSON.stringify(marker.visibleInViews)}`] : []),
               `    tap_action: ${marker.tapAction}`,
               `    hold_action: ${marker.holdAction}`,
               ...(marker.navigationPath ? [`    navigation_path: ${JSON.stringify(marker.navigationPath)}`] : []),
@@ -5236,6 +5373,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         `${indent}    position: ${formatArray(view.position)}`,
         `${indent}    target: ${formatArray(view.target)}`,
         ...(Number.isFinite(view.zoom) ? [`${indent}    zoom: ${Number(view.zoom).toFixed(4)}`] : []),
+        ...(view.icon ? [`${indent}    icon: ${view.icon}`] : []),
+        ...(view.icon_position ? [`${indent}    icon_position: ${formatArray(view.icon_position)}`] : []),
       ]),
     ];
   }
@@ -5253,6 +5392,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           name: row?.name || marker.name || key,
           icon: marker.icon || "",
           markerDisplay: this._normalizeMarkerDisplay(marker.markerDisplay || marker.marker_display),
+          visibleInViews: this._normalizeViewNames(marker.visibleInViews || marker.visible_in_views),
           tapAction: this._exportMarkerAction(row, marker, "tap"),
           holdAction: this._exportMarkerAction(row, marker, "hold"),
           navigationPath: this._normalizeNavigationPath(marker.navigationPath || marker.navigation_path),
@@ -5749,7 +5889,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         }
 
         // --- Edit mode placement handling ---
-        if (this._mode !== "edit" || (!this._pendingLightPath && !this._pendingSubSpot && !this._pendingDeviceKey && !(this._zoneDrawing && this._activeZoneId))) return;
+        if (this._mode !== "edit" || (!this._pendingViewIconPick && !this._pendingLightPath && !this._pendingSubSpot && !this._pendingDeviceKey && !(this._zoneDrawing && this._activeZoneId))) return;
         if (pointerStart && Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > 5) return;
         const rect = renderer.domElement.getBoundingClientRect();
         pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -5757,6 +5897,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         raycaster.setFromCamera(pointer, camera);
         const hit = raycaster.intersectObjects(pickableObjects, true)[0];
         if (!hit) return;
+        if (this._pendingViewIconPick) {
+          this._placeViewIcon(hit.point);
+          return;
+        }
         if (this._pendingLightPath) {
           this._placeLightPathPoint(this._pendingLightPath.key, this._pendingLightPath.index, hit.point, camera);
           return;
@@ -6036,8 +6180,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _build3DMarkerButtons(markerLayer, THREE, camera) {
     if (!markerLayer) return [];
     markerLayer.innerHTML = "";
-    return this._modelMarkerRows().flatMap(({ row, marker }) => {
-      const hidden = this._isMarkerHidden(row);
+    const markerButtons = this._modelMarkerRows().flatMap(({ row, marker }) => {
+      const hidden = this._isMarkerHidden(row) || this._isMarkerOutsideActiveView(row);
       if (hidden && this._mode !== "edit") return [];
       const button = document.createElement("button");
       button.type = "button";
@@ -6108,6 +6252,40 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         });
       }
       return buttons;
+    });
+    return [...markerButtons, ...this._build3DViewIconButtons(markerLayer, THREE)];
+  }
+
+  _build3DViewIconButtons(markerLayer, THREE) {
+    const isEditing = this._mode === "edit";
+    const floorViews = this._normalizeModelViews(this._modelViews?.[this._activeFloorId || "default"]);
+    return Object.entries(floorViews).flatMap(([name, view]) => {
+      if (!view.icon) return [];
+      const leaving = !isEditing && name === this._leavingViewIcon;
+      if (!isEditing && name === this._activeModelView && !leaving) return [];
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `model-marker view-marker ${this._display.showLabels ? "with-label" : "icon-only"} ${leaving ? "leaving" : ""}`;
+      button.dataset.viewMarker = name;
+      button.title = name;
+      button.style.setProperty("--marker-size", `${this._display.markerSize}px`);
+      button.style.setProperty("--marker-default-color", this._defaultMarkerColor());
+      button.innerHTML = `
+        <span><ha-icon icon="${this._escape(view.icon)}"></ha-icon></span>
+        ${this._display.showLabels ? `<strong>${this._escape(name)}</strong>` : ""}
+      `;
+      ["pointerdown", "pointerup"].forEach((type) => button.addEventListener(type, (event) => event.stopPropagation()));
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (button.classList.contains("leaving")) return;
+        this._goToViewFromIcon(name);
+      });
+      markerLayer.appendChild(button);
+      return [{
+        button,
+        position: new THREE.Vector3().fromArray(view.icon_position || view.target),
+      }];
     });
   }
 
@@ -8059,6 +8237,18 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (this._selectedMarkers.has(key)) this._refreshSelectedMarkerPanel();
   }
 
+  _updateMarkerViewVisibility(key, viewName, visible) {
+    if (!this._markers[key]) return;
+    const current = this._normalizeViewNames(this._markers[key].visibleInViews);
+    const next = visible ? [...new Set([...current, viewName])] : current.filter((name) => name !== viewName);
+    if (next.length === current.length && next.every((name) => current.includes(name))) return;
+    this._pushMarkerHistory();
+    this._markers[key].visibleInViews = next;
+    this._saveMarkers();
+    this._refresh3DMarkerOverlay();
+    this._refreshDeviceRow(key);
+  }
+
   _colorThresholdsForMarker(key) {
     const marker = this._markers[key];
     if (!marker) return [];
@@ -8396,6 +8586,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       name: row.name,
       icon: existingMarker?.icon || "",
       markerDisplay: existingMarker?.markerDisplay || "",
+      visibleInViews: existingMarker?.visibleInViews || [],
       tapAction: existingMarker?.tapAction || "",
       holdAction: existingMarker?.holdAction || "",
       colorThresholds: this._normalizeColorThresholds(existingMarker?.colorThresholds || existingMarker?.color_thresholds),
@@ -9149,6 +9340,29 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         .marker.marker-hidden,
         .model-marker.marker-hidden {
           opacity: 0.4;
+        }
+
+        .marker-views-picker {
+          grid-column: 1 / 4;
+          display: grid;
+          gap: 4px;
+        }
+
+        .marker-views-picker small {
+          color: var(--secondary-text-color);
+          font-weight: 400;
+        }
+
+        .marker-views-options {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 4px 12px;
+        }
+
+        .marker-views-options label {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
         }
 
         .marker-display-picker {
@@ -10344,6 +10558,21 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         .model-marker.state-threshold span {
           background: var(--marker-threshold-color);
           color: #fff;
+        }
+
+        .model-marker.view-marker span {
+          background: var(--primary-color, #03a9f4);
+          color: #fff;
+        }
+
+        .model-marker.view-marker.leaving {
+          animation: dmp-view-marker-leave 1s ease-in forwards;
+          pointer-events: none;
+        }
+
+        @keyframes dmp-view-marker-leave {
+          from { opacity: 1; }
+          to { opacity: 0; }
         }
 
         .model-sub-spot {

@@ -94,8 +94,23 @@ markers:
 Temperature and humidity sensors show their live value on the marker. Use **Marker display** in Edit Mode to force icon or value display:
 
 ```yaml
-marker_display: value   # auto | icon | value
+marker_display: value   # auto | icon | value | hide
 ```
+
+### Visible in Views
+Show a marker only while one of the listed named camera views is active. Use
+`default` for the startup (**Home**) view, and `top`, `north`, `east`, `south` or
+`west` for the compass views. Without `visible_in_views` the marker is always shown.
+
+```yaml
+visible_in_views: [kitchen, living_room]
+```
+
+The active view changes only when another view is chosen, through a view icon,
+the compass, **Go** in Edit Mode, or `hafp_view` in the URL. Orbiting or zooming
+the camera keeps the current view active. When the card loads, `default` is active.
+In Edit Mode, markers that are hidden for the current view appear faded. Tick the
+views under **Visible in views** in the marker panel.
 
 ### Color Thresholds
 
@@ -165,6 +180,24 @@ The hash format keeps the current Lovelace page in place and avoids a route refr
 For multiple floors, put `views` inside the relevant floor. The named view is
 applied after the model loads and can also be changed while the card is open.
 
+### View Icons
+Give a view an `icon` to show a clickable icon in the 3D model. Clicking the icon
+moves the camera to that view. The icon then fades out over one second and stays
+hidden while that view is active. It reappears when you choose another view.
+
+```yaml
+views:
+  kitchen:
+    position: [6.2500, 4.5000, 8.7500]
+    target: [0.0000, 0.8000, 0.0000]
+    icon: mdi:silverware-fork-knife
+    icon_position: [1.2000, 1.0000, -0.5000]   # optional, defaults to target
+```
+
+In the **Views** tab, choose a **View icon**, then use **Pick on Model** to click
+where the icon should appear, or **Use Target** to place it at the view target.
+Press **Save View** to keep the icon.
+
 ## Edit Mode
 
 Switch to Edit Mode to place and configure markers.
@@ -176,6 +209,7 @@ Switch to Edit Mode to place and configure markers.
 **Floating panel** - selecting a placed marker opens a panel on the right with:
 - Icon picker
 - Marker display setting
+- Visible in views (only shown when the floor has named views)
 - Tap / Hold actions
 - Light intensity, type, radius, and render parameters (for `light.*` entities in Positional zones)
 - XYZ coordinates
