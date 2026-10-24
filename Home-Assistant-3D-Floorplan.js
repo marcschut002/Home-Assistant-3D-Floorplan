@@ -12303,7 +12303,18 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       if (element.hasAttribute("value")) element.value = element.getAttribute("value") || "";
     });
     this.querySelectorAll("ha-select").forEach((element) => {
+      // Newer ha-select takes an `options` property and fires `selected` with
+      // { value }; older versions use ha-list-item children and `change`.
+      element.options = [...element.querySelectorAll("ha-list-item")].map((item) => ({
+        value: item.getAttribute("value") ?? "",
+        label: item.textContent.trim(),
+      }));
       if (element.hasAttribute("value")) element.value = element.getAttribute("value") || "";
+      element.addEventListener("selected", (event) => {
+        if (!event.detail || !("value" in event.detail)) return;
+        element.value = event.detail.value ?? "";
+        element.dispatchEvent(new Event("change"));
+      });
     });
     this.querySelectorAll("ha-switch").forEach((element) => {
       element.checked = element.hasAttribute("checked");
