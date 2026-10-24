@@ -113,6 +113,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._dashboardEditMode = false;
     this._boundOpenEditorRequest = (event) => this._handleOpenEditorRequest(event);
     this._boundLayoutChanged = (event) => this._handleLayoutChanged(event);
+    this._boundNavRequest = () => this._broadcastNavState();
+    this._boundNavAction = (event) => this._handleNavAction(event);
     this._modelViewAnimation = 0;
     this._modelLoadingUrl = "";
     this._modelLoadFailedUrl = "";
@@ -144,7 +146,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       default_view: null,
       views: {},
       model: "",
-      allow_edit: true,
       marker_tap_action: "auto",
       marker_hold_action: "auto",
       edit_marker_tap_action: "select",
@@ -278,6 +279,44 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._render();
   }
 
+  // Identifies this card to navigation cards (their `target`).
+  _navCardId() {
+    return String(this._config?.storage_key || this._config?.title || "home-assistant-3d-floorplan").trim();
+  }
+
+  _navState() {
+    const floorId = this._activeFloorId || "default";
+    const namedViews = this._modelViews?.[floorId] || {};
+    return {
+      id: this._navCardId(),
+      floors: this._floors.map((floor) => ({ id: floor.id, name: floor.name })),
+      activeFloor: this._activeFloorId,
+      layers: this._layers.map((layer) => ({ id: layer.id, name: layer.name, icon: layer.icon })),
+      activeLayer: this._activeLayer === NO_LAYER ? "" : this._activeLayer,
+      views: [
+        ...(this._modelDefaultViews?.[floorId] ? [{ id: "default", name: "Home", icon: "mdi:home-outline", color: "" }] : []),
+        ...Object.keys(namedViews)
+          .sort((a, b) => a.localeCompare(b))
+          .map((name) => ({ id: name, name, icon: namedViews[name]?.icon || "mdi:camera-outline", color: namedViews[name]?.icon_color || "" })),
+      ],
+      activeView: this._activeModelView,
+    };
+  }
+
+  // The preview inside the card editor stays quiet, so navigation cards follow the dashboard card.
+  _broadcastNavState() {
+    if (!this._config || !this.isConnected || this._isInEditorPreview()) return;
+    window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-state", { detail: this._navState() }));
+  }
+
+  _handleNavAction(event) {
+    const detail = event.detail || {};
+    if (this._isInEditorPreview() || detail.id !== this._navCardId()) return;
+    if (detail.floor !== undefined) this._setActiveFloor(detail.floor);
+    if (detail.layer !== undefined) this._setActiveLayer(detail.layer);
+    if (detail.view !== undefined) this._setModelView(detail.view);
+  }
+
   _clearEditorPendingState() {
     this._pendingDeviceKey = null;
     this._pendingSubSpot = null;
@@ -373,6 +412,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     window.addEventListener("hashchange", this._boundHashChanged);
     window.addEventListener("home-assistant-3d-floorplan-open-editor", this._boundOpenEditorRequest);
     window.addEventListener("home-assistant-3d-floorplan-layout-changed", this._boundLayoutChanged);
+    window.addEventListener("home-assistant-3d-floorplan-nav-request", this._boundNavRequest);
+    window.addEventListener("home-assistant-3d-floorplan-nav-action", this._boundNavAction);
     document.addEventListener("visibilitychange", this._boundVisibilityChange);
     this._queueModelViewerRecovery();
   }
@@ -383,13 +424,14 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     window.removeEventListener("hashchange", this._boundHashChanged);
     window.removeEventListener("home-assistant-3d-floorplan-open-editor", this._boundOpenEditorRequest);
     window.removeEventListener("home-assistant-3d-floorplan-layout-changed", this._boundLayoutChanged);
+    window.removeEventListener("home-assistant-3d-floorplan-nav-request", this._boundNavRequest);
+    window.removeEventListener("home-assistant-3d-floorplan-nav-action", this._boundNavAction);
     document.removeEventListener("visibilitychange", this._boundVisibilityChange);
     window.clearTimeout(this._modelRecoveryTimer);
     this._disposeModelViewer();
   }
 
   _canEdit() {
-    if (this._config.allow_edit === false) return false;
     return this._hass?.user?.is_admin === true;
   }
 
@@ -1274,6 +1316,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _saveModelDefaultViews() {
+    this._broadcastNavState();
     if (this._config.persist_layout === false) return;
 
     try {
@@ -1302,6 +1345,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _saveModelViews() {
+    this._broadcastNavState();
     if (this._config.persist_layout !== false) {
       try {
         localStorage.setItem(this._modelViewsStorageKey(), JSON.stringify(this._modelViews));
@@ -1660,6 +1704,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
     if (isEditing) this._showEditOverlay();
     this._attachEvents();
+    this._broadcastNavState();
     if (isModelView) this._renderModelViewer(activeModel);
     requestAnimationFrame(() => {
       if (this._pendingMarkerFocus) {
@@ -2669,6 +2714,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._activeModelView = "default";
     this._mapScroll = { left: 0, top: 0, leftRatio: 0, topRatio: 0 };
     this._render();
+    this._broadcastNavState();
     return true;
   }
 
@@ -3605,6 +3651,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (viewName === this._activeModelView) return;
     this._activeModelView = viewName;
     this._refresh3DMarkerOverlay();
+    this._broadcastNavState();
   }
 
   _goToViewFromIcon(name) {
@@ -4556,6 +4603,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (layerId === this._activeLayer) return;
     this._activeLayer = layerId;
     this._refreshLayerSwitcher();
+    this._broadcastNavState();
     if (this._modelViewer) {
       this._refresh3DMarkerOverlay();
     } else if (!this._isControlActive()) {
@@ -12766,7 +12814,6 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         <section>
           <h3>Editing & Display</h3>
           <div class="editor-grid">
-            ${this._checkboxInput("allow_edit", "Allow Admin Edit Mode", true)}
             ${this._checkboxInput("show_layer_switcher", "Show Layer Switcher", true)}
             ${this._checkboxInput("show_labels", "Show Marker Names", true)}
             ${this._checkboxInput("show_entity_state", "Use Entity State Colors", true)}
@@ -13394,7 +13441,6 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       "model",
       "model_background",
       "view_mode",
-      "allow_edit",
       "show_layer_switcher",
       "show_labels",
       "show_entity_state",
@@ -13902,10 +13948,271 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
 
 customElements.define("home-assistant-3d-floorplan-editor", HomeAssistant3DFloorplanEditor);
 
+// Floor, layer and view buttons for a floorplan card elsewhere on the dashboard.
+class HomeAssistant3DFloorplanNav extends HTMLElement {
+  static getConfigElement() {
+    return document.createElement("home-assistant-3d-floorplan-nav-editor");
+  }
+
+  static getStubConfig() {
+    return { show: ["floors", "layers"], layout: "vertical" };
+  }
+
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._state = null;
+    this._stateSignature = "";
+    this._boundState = (event) => this._handleState(event);
+  }
+
+  setConfig(config) {
+    const groups = ["floors", "layers", "views"];
+    const show = (Array.isArray(config?.show) ? config.show : String(config?.show || "").split(","))
+      .map((group) => String(group).trim())
+      .filter((group, index, list) => groups.includes(group) && list.indexOf(group) === index);
+    this._config = {
+      ...config,
+      layout: config?.layout === "horizontal" ? "horizontal" : "vertical",
+      align: ["center", "end"].includes(config?.align) ? config.align : "start",
+      labels: config?.labels !== false,
+      titles: config?.titles !== false,
+      target: String(config?.target || "").trim(),
+      show: show.length ? show : groups,
+    };
+    if (this._state && this._config.target && this._state.id.toLowerCase() !== this._config.target.toLowerCase()) this._state = null;
+    this._render();
+    this._requestState();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+  }
+
+  // Set by Home Assistant while the dashboard or this card is being edited.
+  set preview(value) {
+    this._preview = Boolean(value);
+    this._render();
+  }
+
+  connectedCallback() {
+    window.addEventListener("home-assistant-3d-floorplan-state", this._boundState);
+    this._requestState();
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener("home-assistant-3d-floorplan-state", this._boundState);
+  }
+
+  getCardSize() {
+    return this._config?.layout === "horizontal" ? 1 : 4;
+  }
+
+  getGridOptions() {
+    return this._config?.layout === "horizontal"
+      ? { columns: 12, rows: "auto", min_columns: 3 }
+      : { columns: 3, rows: "auto", min_columns: 2 };
+  }
+
+  _requestState() {
+    if (this.isConnected) window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-nav-request"));
+  }
+
+  _handleState(event) {
+    const state = event.detail;
+    if (!state?.id || !this._config) return;
+    const target = this._config.target.toLowerCase();
+    if (target ? state.id.toLowerCase() !== target : this._state && this._state.id !== state.id) return;
+    const signature = JSON.stringify(state);
+    this._state = state;
+    if (signature === this._stateSignature) return;
+    this._stateSignature = signature;
+    this._render();
+  }
+
+  _send(kind, value) {
+    if (!this._state) return;
+    window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-nav-action", { detail: { id: this._state.id, [kind]: value } }));
+  }
+
+  _groups() {
+    const state = this._state;
+    const groups = {
+      floors: state.floors.length > 1
+        ? { kind: "floor", title: "Floor", items: state.floors.map((floor) => ({ value: floor.id, name: floor.name, icon: "mdi:stairs", active: floor.id === state.activeFloor })) }
+        : null,
+      layers: state.layers.length
+        ? { kind: "layer", title: "Layer", items: [{ id: "", name: "All", icon: "mdi:layers-outline" }, ...state.layers].map((layer) => ({ value: layer.id, name: layer.name, icon: layer.icon, active: layer.id === state.activeLayer })) }
+        : null,
+      views: state.views.length
+        ? { kind: "view", title: "View", items: state.views.map((view) => ({ value: view.id, name: view.name, icon: view.icon, color: view.color, active: view.id === state.activeView })) }
+        : null,
+    };
+    return this._config.show.map((key) => groups[key]).filter(Boolean);
+  }
+
+  _render() {
+    if (!this.shadowRoot || !this._config) return;
+    const { layout, align, labels, titles } = this._config;
+    const groups = this._state ? this._groups() : [];
+    // Nothing to choose (e.g. a floor without views): hide the card outside of editing.
+    this.style.display = this._state && !groups.length && !this._preview ? "none" : "";
+    const body = !this._state
+      ? `<div class="empty">No 3D floorplan card found on this dashboard${this._config.target ? ` with target "${this._escape(this._config.target)}"` : ""}.</div>`
+      : !groups.length
+        ? `<div class="empty">Nothing to show: the floorplan has no ${this._config.show.join(", ")} to choose from.</div>`
+        : groups.map((group) => `
+          <section class="group" role="group" aria-label="${this._escape(group.title)}">
+            ${titles && layout === "vertical" ? `<div class="group-title">${this._escape(group.title)}</div>` : ""}
+            <div class="items">
+              ${group.items.map((item) => `
+                <button type="button" class="item ${item.active ? "active" : ""}" data-kind="${group.kind}" data-value="${this._escape(item.value)}" aria-pressed="${item.active ? "true" : "false"}" title="${this._escape(item.name)}" ${labels ? "" : `aria-label="${this._escape(item.name)}"`}>
+                  <ha-icon icon="${this._escape(item.icon)}" ${item.color && !item.active ? `style="color: ${this._escape(item.color)}"` : ""}></ha-icon>
+                  ${labels ? `<span>${this._escape(item.name)}</span>` : ""}
+                </button>
+              `).join("")}
+            </div>
+          </section>
+        `).join(`<div class="divider" aria-hidden="true"></div>`);
+    this.shadowRoot.innerHTML = `
+      <ha-card class="${layout} align-${align} ${labels ? "" : "icons-only"}">${body}</ha-card>
+      <style>
+        :host { display: block; }
+        ha-card { box-sizing: border-box; height: 100%; padding: 12px; }
+        .vertical { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+        .horizontal { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+        .horizontal.align-center { justify-content: center; }
+        .horizontal.align-end { justify-content: flex-end; }
+        .group { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+        .group-title { color: var(--secondary-text-color); font-size: 12px; font-weight: 500; padding: 0 8px 2px; }
+        .items { display: flex; flex-direction: column; gap: 4px; }
+        .horizontal .items { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+        .divider { background: var(--divider-color, rgba(127, 127, 127, 0.25)); }
+        .vertical .divider { height: 1px; }
+        .horizontal .divider { width: 1px; align-self: stretch; min-height: 28px; }
+        .item {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-height: 44px;
+          border: 0;
+          border-radius: 8px;
+          background: transparent;
+          color: var(--primary-text-color);
+          cursor: pointer;
+          font: inherit;
+          font-size: 14px;
+          font-weight: 500;
+          padding: 0 10px;
+          text-align: left;
+          --mdc-icon-size: 20px;
+        }
+        .item:hover { background: var(--secondary-background-color, rgba(127, 127, 127, 0.12)); }
+        .item:focus-visible { outline: 2px solid var(--primary-color); outline-offset: 2px; }
+        .vertical .item.active {
+          background: color-mix(in srgb, var(--primary-color, #03a9f4) 18%, transparent);
+          color: var(--primary-color, #03a9f4);
+        }
+        .horizontal .item {
+          gap: 6px;
+          min-height: 40px;
+          border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.35));
+          border-radius: 999px;
+          padding: 0 14px;
+          --mdc-icon-size: 18px;
+        }
+        .horizontal .item.active {
+          border-color: var(--primary-color, #03a9f4);
+          background: var(--primary-color, #03a9f4);
+          color: var(--text-primary-color, #fff);
+        }
+        .icons-only .item { justify-content: center; min-width: 44px; padding: 0; }
+        .horizontal.icons-only .item { width: 44px; height: 44px; border-radius: 50%; }
+        .empty { color: var(--secondary-text-color); font-size: 13px; padding: 4px; }
+      </style>
+    `;
+    this.shadowRoot.querySelectorAll(".item").forEach((button) => {
+      button.addEventListener("click", () => this._send(button.dataset.kind, button.dataset.value));
+    });
+  }
+
+  _escape(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+}
+
+class HomeAssistant3DFloorplanNavEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this._form) this._form.hass = hass;
+  }
+
+  _render() {
+    if (!this._form) {
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = (schema) => ({
+        show: "Show",
+        layout: "Layout",
+        align: "Alignment (horizontal)",
+        labels: "Show names next to icons",
+        titles: "Show group titles (vertical)",
+        target: "Target card (storage_key or title, only with several floorplan cards)",
+      })[schema.name] || schema.name;
+      this._form.addEventListener("value-changed", (event) => {
+        this._config = { ...this._config, ...event.detail.value };
+        this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: this._config }, bubbles: true, composed: true }));
+      });
+      this.appendChild(this._form);
+    }
+    this._form.hass = this._hass;
+    this._form.schema = [
+      {
+        name: "show",
+        selector: { select: { multiple: true, mode: "list", options: [
+          { value: "floors", label: "Floors" },
+          { value: "layers", label: "Layers" },
+          { value: "views", label: "Views" },
+        ] } },
+      },
+      { name: "layout", selector: { select: { mode: "dropdown", options: [{ value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }] } } },
+      { name: "align", selector: { select: { mode: "dropdown", options: [{ value: "start", label: "Start" }, { value: "center", label: "Center" }, { value: "end", label: "End" }] } } },
+      { name: "labels", selector: { boolean: {} } },
+      { name: "titles", selector: { boolean: {} } },
+      { name: "target", selector: { text: {} } },
+    ];
+    this._form.data = {
+      show: ["floors", "layers", "views"],
+      layout: "vertical",
+      align: "start",
+      labels: true,
+      titles: true,
+      target: "",
+      ...this._config,
+    };
+  }
+}
+
+customElements.define("home-assistant-3d-floorplan-nav", HomeAssistant3DFloorplanNav);
+customElements.define("home-assistant-3d-floorplan-nav-editor", HomeAssistant3DFloorplanNavEditor);
+
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "home-assistant-3d-floorplan",
   name: "Home Assistant 3D Floorplan",
   description: "Place Home Assistant entities directly on a 3D model.",
+});
+window.customCards.push({
+  type: "home-assistant-3d-floorplan-nav",
+  name: "Home Assistant 3D Floorplan Navigation",
+  description: "Floor, layer and view buttons for a 3D floorplan card on the same dashboard.",
 });
 

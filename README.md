@@ -138,6 +138,42 @@ So for the example above: values below 18 are blue, 18–21.9 are blue, 22–25.
 
 In Edit Mode, select a numeric sensor marker and use **Color thresholds** in the marker settings panel to add, edit, or remove threshold rows.
 
+## Navigation Card
+
+`custom:home-assistant-3d-floorplan-nav` is a second card, shipped in the same file,
+with buttons for the floors, layers and views of a floorplan card on the same
+dashboard. Place it above, below or next to the floorplan card. It fills itself from
+the floorplan card, so there is nothing to retype: new views and layers appear on
+their own, and the active floor, layer and view are highlighted, however they were
+chosen. Views follow the active floor.
+
+```yaml
+# next to the floorplan
+type: custom:home-assistant-3d-floorplan-nav
+show: [floors, layers]
+layout: vertical
+
+# above or below the floorplan
+type: custom:home-assistant-3d-floorplan-nav
+show: [views]
+layout: horizontal
+align: center
+```
+
+| Option | Default | Description |
+| --- | --- | --- |
+| `show` | `[floors, layers, views]` | Which groups to show, in this order. A group with nothing to choose (one floor, no layers, no views) is left out. |
+| `layout` | `vertical` | `vertical` for a column of rows with group titles, `horizontal` for a row of round buttons. |
+| `align` | `start` | `start`, `center` or `end`; horizontal layout only. |
+| `labels` | `true` | `false` shows icons only. |
+| `titles` | `true` | Group titles in the vertical layout. |
+| `target` | | The floorplan card's `storage_key`, or else its `title`. Only needed with several floorplan cards on one dashboard; without it the first one found is used. |
+
+A card with nothing to show, such as a views card on a floor without views, hides
+itself; while editing the dashboard it shows why instead. Set
+`show_layer_switcher: false` on the floorplan card to drop its built-in layer buttons
+when a navigation card shows the layers.
+
 ## Layers
 
 Layers group markers so you can switch between, for example, lighting, climate and
@@ -282,8 +318,6 @@ and panel dashboards), use **Export YAML** in the sidebar as before.
 The sidebar header shows the current floor, with a floor picker when the card has
 more than one floor. In each mode, only that mode's items respond to clicks in the
 model. The others are dimmed.
-
-Set `allow_edit: false` to turn editing off completely.
 
 **Markers** - the sidebar has two lists:
 - **On map** - the markers on this floor, grouped by area. Click a row to select the
