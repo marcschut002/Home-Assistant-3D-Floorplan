@@ -163,11 +163,23 @@ align: center
 | Option | Default | Description |
 | --- | --- | --- |
 | `show` | `[floors, layers, views]` | Which groups to show, in this order. A group with nothing to choose (one floor, no layers, no views) is left out. |
-| `layout` | `vertical` | `vertical` for a column of rows with group titles, `horizontal` for a row of round buttons. |
+| `style` | `buttons` | `buttons`, or `dropdown` for one compact select per group. Dropdowns use the phone's own picker, which suits mobile. |
+| `layout` | `vertical` | `vertical` stacks the groups; `horizontal` puts them in one row (round buttons, or dropdowns side by side that wrap on narrow screens). |
 | `align` | `start` | `start`, `center` or `end`; horizontal layout only. |
 | `labels` | `true` | `false` shows icons only. |
 | `titles` | `true` | Group titles in the vertical layout. |
 | `target` | | The floorplan card's `storage_key`, or else its `title`. Only needed with several floorplan cards on one dashboard; without it the first one found is used. |
+
+For a different navigation on phones, add two navigation cards and give each a
+**Screen** visibility condition in the card's Visibility tab: the dropdown card for
+mobile widths, the button card for wider screens.
+
+```yaml
+type: custom:home-assistant-3d-floorplan-nav
+style: dropdown
+layout: horizontal
+show: [floors, layers, views]
+```
 
 A card with nothing to show, such as a views card on a floor without views, hides
 itself; while editing the dashboard it shows why instead. Set

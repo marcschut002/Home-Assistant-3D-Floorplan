@@ -13973,6 +13973,7 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
       .filter((group, index, list) => groups.includes(group) && list.indexOf(group) === index);
     this._config = {
       ...config,
+      style: config?.style === "dropdown" ? "dropdown" : "buttons",
       layout: config?.layout === "horizontal" ? "horizontal" : "vertical",
       align: ["center", "end"].includes(config?.align) ? config.align : "start",
       labels: config?.labels !== false,
@@ -14051,9 +14052,26 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
     return this._config.show.map((key) => groups[key]).filter(Boolean);
   }
 
+  _dropdownTemplate(groups) {
+    return groups.map((group) => {
+      const active = group.items.find((item) => item.active);
+      return `
+        <label class="select-field">
+          <span class="select-label">${this._escape(group.title)}</span>
+          <ha-icon class="select-icon" icon="${this._escape(active?.icon || "mdi:help-circle-outline")}"></ha-icon>
+          <select data-kind="${group.kind}">
+            ${active ? "" : `<option value="" selected disabled>Choose…</option>`}
+            ${group.items.map((item) => `<option value="${this._escape(item.value)}" ${item.active ? "selected" : ""}>${this._escape(item.name)}</option>`).join("")}
+          </select>
+          <svg class="select-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
+        </label>
+      `;
+    }).join("");
+  }
+
   _render() {
     if (!this.shadowRoot || !this._config) return;
-    const { layout, align, labels, titles } = this._config;
+    const { style, layout, align, labels, titles } = this._config;
     const groups = this._state ? this._groups() : [];
     // Nothing to choose (e.g. a floor without views): hide the card outside of editing.
     this.style.display = this._state && !groups.length && !this._preview ? "none" : "";
@@ -14061,7 +14079,9 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
       ? `<div class="empty">No 3D floorplan card found on this dashboard${this._config.target ? ` with target "${this._escape(this._config.target)}"` : ""}.</div>`
       : !groups.length
         ? `<div class="empty">Nothing to show: the floorplan has no ${this._config.show.join(", ")} to choose from.</div>`
-        : groups.map((group) => `
+        : style === "dropdown"
+          ? this._dropdownTemplate(groups)
+          : groups.map((group) => `
           <section class="group" role="group" aria-label="${this._escape(group.title)}">
             ${titles && layout === "vertical" ? `<div class="group-title">${this._escape(group.title)}</div>` : ""}
             <div class="items">
@@ -14075,7 +14095,7 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
           </section>
         `).join(`<div class="divider" aria-hidden="true"></div>`);
     this.shadowRoot.innerHTML = `
-      <ha-card class="${layout} align-${align} ${labels ? "" : "icons-only"}">${body}</ha-card>
+      <ha-card class="${style === "dropdown" ? `dropdowns ${layout}-dropdowns` : layout} align-${align} ${labels ? "" : "icons-only"}">${body}</ha-card>
       <style>
         :host { display: block; }
         ha-card { box-sizing: border-box; height: 100%; padding: 12px; }
@@ -14129,10 +14149,72 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
         .icons-only .item { justify-content: center; min-width: 44px; padding: 0; }
         .horizontal.icons-only .item { width: 44px; height: 44px; border-radius: 50%; }
         .empty { color: var(--secondary-text-color); font-size: 13px; padding: 4px; }
+        .dropdowns { display: grid; gap: 8px; }
+        .horizontal-dropdowns { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+        .select-field {
+          position: relative;
+          display: block;
+          min-width: 0;
+          border-radius: 6px 6px 0 0;
+          border-bottom: 1px solid var(--secondary-text-color);
+          background: var(--input-fill-color, var(--secondary-background-color, rgba(127, 127, 127, 0.12)));
+        }
+        .select-field:focus-within { border-bottom: 2px solid var(--primary-color); }
+        .select-label {
+          position: absolute;
+          top: 6px;
+          left: 44px;
+          color: var(--secondary-text-color);
+          font-size: 12px;
+          pointer-events: none;
+        }
+        .select-field:focus-within .select-label { color: var(--primary-color); }
+        .select-icon {
+          position: absolute;
+          top: 50%;
+          left: 12px;
+          color: var(--secondary-text-color);
+          transform: translateY(-50%);
+          pointer-events: none;
+          --mdc-icon-size: 20px;
+        }
+        .select-field select {
+          box-sizing: border-box;
+          width: 100%;
+          min-height: 56px;
+          border: 0;
+          background: transparent;
+          color: var(--primary-text-color);
+          cursor: pointer;
+          font: inherit;
+          font-size: 16px;
+          padding: 20px 36px 4px 44px;
+          appearance: none;
+          -webkit-appearance: none;
+        }
+        .select-field select:focus { outline: none; }
+        .select-field option { background: var(--card-background-color, #fff); color: var(--primary-text-color); }
+        .select-chevron {
+          position: absolute;
+          top: 50%;
+          right: 10px;
+          width: 20px;
+          height: 20px;
+          fill: none;
+          stroke: var(--secondary-text-color);
+          stroke-width: 2;
+          stroke-linecap: round;
+          stroke-linejoin: round;
+          transform: translateY(-50%);
+          pointer-events: none;
+        }
       </style>
     `;
     this.shadowRoot.querySelectorAll(".item").forEach((button) => {
       button.addEventListener("click", () => this._send(button.dataset.kind, button.dataset.value));
+    });
+    this.shadowRoot.querySelectorAll(".select-field select").forEach((select) => {
+      select.addEventListener("change", () => this._send(select.dataset.kind, select.value));
     });
   }
 
@@ -14161,6 +14243,7 @@ class HomeAssistant3DFloorplanNavEditor extends HTMLElement {
       this._form = document.createElement("ha-form");
       this._form.computeLabel = (schema) => ({
         show: "Show",
+        style: "Style",
         layout: "Layout",
         align: "Alignment (horizontal)",
         labels: "Show names next to icons",
@@ -14183,6 +14266,7 @@ class HomeAssistant3DFloorplanNavEditor extends HTMLElement {
           { value: "views", label: "Views" },
         ] } },
       },
+      { name: "style", selector: { select: { mode: "dropdown", options: [{ value: "buttons", label: "Buttons" }, { value: "dropdown", label: "Dropdowns (compact, good on mobile)" }] } } },
       { name: "layout", selector: { select: { mode: "dropdown", options: [{ value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }] } } },
       { name: "align", selector: { select: { mode: "dropdown", options: [{ value: "start", label: "Start" }, { value: "center", label: "Center" }, { value: "end", label: "End" }] } } },
       { name: "labels", selector: { boolean: {} } },
@@ -14191,6 +14275,7 @@ class HomeAssistant3DFloorplanNavEditor extends HTMLElement {
     ];
     this._form.data = {
       show: ["floors", "layers", "views"],
+      style: "buttons",
       layout: "vertical",
       align: "start",
       labels: true,
