@@ -29,7 +29,6 @@ type: custom:home-assistant-3d-floorplan
 title: 3D Floorplan
 model: /local/floorplans/home.glb
 view_mode: "3d"
-show_navigation_buttons: true
 markers: []
 ```
 
@@ -39,9 +38,6 @@ Assistant card background behind the 3D model. In YAML, use:
 ```yaml
 model_background: transparent
 ```
-
-Set `show_navigation_buttons: false` to hide the 3D navigation buttons (`N`,
-`W`, `E`, `S`, `Top`, `Home`, `Save Home`, and `Clear`).
 
 ## Coordinate System
 
@@ -99,15 +95,15 @@ marker_display: value   # auto | icon | value | hide
 
 ### Visible in Views
 Show a marker only while one of the listed named camera views is active. Use
-`default` for the startup (**Home**) view, and `top`, `north`, `east`, `south` or
-`west` for the compass views. Without `visible_in_views` the marker is always shown.
+`default` for the startup (**Home**) view. Without `visible_in_views` the marker is
+always shown.
 
 ```yaml
 visible_in_views: [kitchen, living_room]
 ```
 
 The active view changes only when another view is chosen, through a view icon,
-the compass, **Go** in Edit Mode, or `hafp_view` in the URL. Orbiting or zooming
+the play button in the editor's Views mode, or `hafp_view` in the URL. Orbiting or zooming
 the camera keeps the current view active. When the card loads, `default` is active.
 In Edit Mode, markers that are hidden for the current view appear faded. Tick the
 views under **Visible in views** in the marker panel.
@@ -254,10 +250,10 @@ views:
     icon_color: "#ff9800"                       # optional, defaults to the theme primary color
 ```
 
-In the **Views** tab, choose a **View icon** and optionally an **Icon color**
-(**Theme Color** resets it), then use **Pick on Model** to click
+In the editor's **Views** mode, open a view and choose a **View icon** and optionally
+an **Icon color** (**Theme Color** resets it). Then use **Pick on Model** to click
 where the icon should appear, or **Use Target** to place it at the view target.
-Press **Save View** to keep the icon.
+Press **Save view** to keep the icon.
 
 ## Edit Mode
 
@@ -281,9 +277,26 @@ model. The others are dimmed.
 
 Set `allow_edit: false` to turn editing off completely.
 
-**Sidebar (Markers)** - lists all HA entities. Placed markers show a **Remove** button. Unplaced markers show **Add**; clicking it then clicking the 3D model places the marker at that surface point.
+**Markers** - the sidebar has two lists:
+- **On map** - the markers on this floor, grouped by area. Click a row to select the
+  marker and open its panel. The crosshair button flies the camera to it. Small icons
+  show markers that are hidden or limited to some views.
+- **Add** - entities that are not placed yet. Click one, then click the model to place
+  it. **Filters & placement** holds the availability, domain, integration and area
+  filters and the placement mode. Automations, scripts, helpers and other system
+  entities are left out unless you turn them on there.
 
-**Views** - open the **Views** mode, position the camera in the 3D model, and press **Use Current Camera**. Enter a name and press **Save View**. Saved views can be selected for editing, previewed with **Go**, or removed. Views are stored per floor and included in the YAML export.
+With layers configured, a **Layer** picker filters both lists and the model. **No
+layer** shows markers that are in no layer yet. In **Add**, entities that match the
+layer come first. Placing one of the others adds it to the layer.
+
+**Areas** - a list of brightness areas. **Add area** starts a new one in drawing
+mode. Click an area to edit it, and use ← to go back to the list.
+
+**Views** - a list with the Home (startup) view and your named views. **New view**
+starts from the current camera. Click a view to edit its name, camera and icon,
+and use **Preview** to fly to the edited camera. Renaming a view replaces the old
+one. The play button on a row goes to that view.
 
 **Marker panel** - selecting a placed marker opens a panel on the right. Its
 settings are grouped in collapsible sections, each showing a short summary when
@@ -304,12 +317,10 @@ closed:
 
 ## Camera Views
 
-The compass in the corner provides:
-
-- **Top** - straight top-down view
-- **N / E / S / W** - 45-degree angled side views
-
-In Edit Mode, **Save Home** stores the current camera position as the startup view. The saved view is stored per-floor and is written to the YAML export:
+The Home view is the camera position the card starts in. Set it in the editor's
+**Views** mode: the **Home** row at the top of the list can save the current camera,
+clear it, or go to it. Without a Home view the camera fits the whole model. The
+Home view is stored per floor and is written to the YAML export:
 
 ```yaml
 default_view:

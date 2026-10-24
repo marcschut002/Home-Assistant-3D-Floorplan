@@ -1,4 +1,12 @@
 ﻿const VERSION = "2.11.0";
+// Edit-only layer filter: markers that belong to no layer.
+const NO_LAYER = "__none__";
+// Domains left out of the "Add" list unless "Show all entity types" is on.
+const SYSTEM_DOMAINS = [
+  "automation", "script", "scene", "update", "zone", "sun", "conversation", "tts", "stt", "wake_word",
+  "assist_satellite", "ai_task", "event", "notify", "todo", "image", "counter", "timer",
+  "input_boolean", "input_number", "input_select", "input_text", "input_datetime", "input_button",
+];
 class HomeAssistant3DFloorplan extends HTMLElement {
   static getConfigElement() {
     return document.createElement("home-assistant-3d-floorplan-editor");
@@ -11,7 +19,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       view_mode: "3d",
       default_view: null,
       views: {},
-      show_navigation_buttons: true,
       offline_states: ["unavailable", "unknown"],
       markers: [],
       floors: [],
@@ -52,6 +59,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._sidebarCollapsed = false;
     this._sidebarTab = "markers";
     this._filtersCollapsed = true;
+    this._markerListMode = "placed";
+    this._showAllEntityTypes = false;
+    this._markerListSignature = "";
+    this._areaDetailOpen = false;
+    this._viewDetailOpen = false;
     this._zoom = 1;
     this._exportOpen = false;
     this._display = {
@@ -131,7 +143,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       view_mode: "3d",
       default_view: null,
       views: {},
-      show_navigation_buttons: true,
       model: "",
       allow_edit: true,
       marker_tap_action: "auto",
@@ -286,6 +297,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const nextTool = ["markers", "areas", "views"].includes(tool) ? tool : "markers";
     if (this._mode === "edit" && this._sidebarTab === nextTool) return;
     this._clearEditorPendingState();
+    if (this._sidebarTab !== nextTool) {
+      this._areaDetailOpen = false;
+      this._viewDetailOpen = false;
+    }
     this._sidebarTab = nextTool;
     this._sidebarCollapsed = false;
     this._mode = "edit";
@@ -295,6 +310,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _closeEditor() {
     if (this._mode !== "edit") return;
     this._clearEditorPendingState();
+    if (this._activeLayer === NO_LAYER) this._activeLayer = "";
     this._mode = "user";
     this._render();
     window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-layout-changed", {
@@ -1553,7 +1569,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const selectionEnd = typeof activeElement?.selectionEnd === "number" ? activeElement.selectionEnd : null;
 
     const rows = this._deviceRows();
-    const filteredRows = this._filteredRows(rows);
     const rowByKey = new Map(rows.map((row) => [row.key, row]));
     const activeFloor = this._activeFloor();
     const floorTitle = this._hasMultipleFloors() ? `${this._config.title} - ${activeFloor.name}` : this._config.title;
@@ -1594,79 +1609,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
             </div>
             ${
               this._sidebarTab === "areas"
-                ? `
-            <div class="sidebar-tab-panel areas-panel">
-              <section class="zone-tools">
-                <div class="zone-tools-title">
-                  <strong>Brightness Areas</strong>
-                  <button type="button" data-zone-add>Add Area</button>
-                </div>
-                ${this._zoneToolsTemplate()}
-              </section>
-            </div>
-            `
+                ? `<div class="sidebar-tab-panel areas-panel"><section class="zone-tools">${this._zoneToolsTemplate()}</section></div>`
                 : this._sidebarTab === "views"
-                  ? `
-            <div class="sidebar-tab-panel views-panel">
-              <section class="view-tools">
-                <div class="zone-tools-title">
-                  <strong>Camera Views</strong>
-                  <button type="button" data-view-use-current>Use Current Camera</button>
-                </div>
-                ${this._modelViewToolsTemplate()}
-              </section>
-            </div>
-            `
-                  : `
-            <div class="sidebar-tab-panel markers-panel">
-              <section class="filters">
-                <button type="button" class="filters-toggle" data-filters-toggle aria-expanded="${this._filtersCollapsed ? "false" : "true"}">
-                  <span>Filters</span>
-                  <span>${this._activeFilterCount() ? `${this._activeFilterCount()} active` : "All"}</span>
-                </button>
-                ${this._filtersCollapsed ? "" : `
-                <div class="filters-options">
-                  ${this._select("placement", "Placement", [
-                    ["all", "All placements"],
-                    ["placed", "Placed"],
-                    ["unplaced", "Unplaced"],
-                  ])}
-                  ${this._select("availability", "Availability", [
-                    ["all", "All"],
-                    ["offline", "Offline"],
-                    ["online", "Online"],
-                  ])}
-                  ${this._select("domain", "Domain", [["all", "All domains"], ...this._options(rows, "domains").map((value) => [value, value])])}
-                  ${this._select("integration", "Integration", [["all", "All integrations"], ...this._options(rows, "integrations").map((value) => [value, value])])}
-                  ${this._select("area", "Area", [["all", "All areas"], ...this._options(rows, "areaName").map((value) => [value, value])])}
-                </div>
-                `}
-                <label>
-                  <span>Search</span>
-                  <input data-filter="search" value="${this._escape(this._filters.search)}" placeholder="Device, entity, area..." />
-                </label>
-              </section>
-              <section class="bulk-actions">
-                <label class="placement-mode">
-                  <span>Move Mode</span>
-                  <select data-placement-mode>
-                    ${[
-                      ["surface", "Surface click"],
-                      ["floor", "Floor only"],
-                      ["height", "Height only"],
-                      ["auto", "Auto by view"],
-                    ]
-                      .map(([value, label]) => `<option value="${value}" ${this._placementMode === value ? "selected" : ""}>${label}</option>`)
-                      .join("")}
-                  </select>
-                </label>
-                <button type="button" data-auto-place="filtered">Add visible unplaced</button>
-              </section>
-              <section class="devices">
-                ${filteredRows.map((row) => this._deviceListItem(row)).join("") || `<div class="empty-list">No devices match</div>`}
-              </section>
-            </div>
-            `
+                  ? `<div class="sidebar-tab-panel views-panel"><section class="view-tools">${this._modelViewToolsTemplate()}</section></div>`
+                  : `<div class="sidebar-tab-panel markers-panel" data-markers-panel>${this._markersSidebarTemplate(rows)}</div>`
             }
             <details class="export" data-export ${this._exportOpen ? "open" : ""}>
               <summary>Export YAML</summary>
@@ -1690,7 +1636,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               <div class="model-marker-layer" data-model-marker-layer></div>
               <div class="model-zone-label-layer" data-zone-label-layer></div>
               <div class="model-zone-point-layer" data-zone-point-layer></div>
-              ${this._modelCompassTemplate()}
               ${this._layerSwitcherTemplate()}
               ${isEditing && this._sidebarTab === "markers" ? `<div class="selected-marker-panel" data-selected-marker-panel>${this._selectedMarkerPanel()}</div>` : ""}
               <div class="model-status" data-model-status>${isEditing ? "Select an entity, then click the 3D model to place it." : "Loading 3D model..."}</div>
@@ -1800,7 +1745,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
     this._bindOfflineAlertControls();
 
-    this._bindModelViewControls();
     this._bindLayerSwitcher();
 
     this.shadowRoot.querySelectorAll("[data-zoom]").forEach((element) => {
@@ -1892,48 +1836,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       return;
     }
 
-    this.shadowRoot.querySelectorAll("[data-filter]").forEach((element) => {
-      element.addEventListener("input", (event) => {
-        this._filters[event.target.dataset.filter] = event.target.value;
-        this._render();
-      });
-    });
-
-    this.shadowRoot.querySelectorAll("[data-filters-toggle]").forEach((element) => {
-      element.addEventListener("click", (event) => {
-        event.stopPropagation();
-        this._filtersCollapsed = !this._filtersCollapsed;
-        this._render();
-      });
-    });
-
-    this.shadowRoot.querySelectorAll("[data-device]").forEach((element) => {
-      element.addEventListener("click", (event) => {
-        if (!isEditing) return;
-        if (this._isInteractiveControl(event.target)) return;
-        this._pendingDeviceKey = event.currentTarget.dataset.device;
-        const status = this.shadowRoot.querySelector("[data-model-status]");
-        if (status) {
-          const row = this._deviceRows().find((item) => item.key === this._pendingDeviceKey);
-          status.hidden = false;
-          status.textContent = row ? `Click the 3D model to place ${row.name}.` : "Click the 3D model to place the selected entity.";
-        }
-        this.shadowRoot.querySelectorAll("[data-device]").forEach((row) => {
-          row.classList.toggle("is-pending", row.dataset.device === this._pendingDeviceKey);
-          const badge = row.querySelector(".select-marker");
-          if (badge && !row.classList.contains("is-placed")) badge.textContent = row.dataset.device === this._pendingDeviceKey ? "Click model…" : "Add";
-        });
-      });
-      element.addEventListener("dragstart", (event) => {
-        if (element.classList.contains("is-placed") || this._isInteractiveControl(event.target)) {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        event.dataTransfer.setData("text/plain", event.currentTarget.dataset.device);
-        event.dataTransfer.effectAllowed = "copyMove";
-      });
-    });
+    const markersPanel = this.shadowRoot.querySelector("[data-markers-panel]");
+    if (markersPanel) this._bindMarkersPanel(markersPanel);
 
     this.shadowRoot.querySelectorAll("[data-remove]").forEach((element) => {
       element.addEventListener("click", (event) => {
@@ -2212,25 +2116,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._bindSubSpotControls(this.shadowRoot);
     this._bindLightPathControls(this.shadowRoot);
 
-    this.shadowRoot.querySelectorAll("[data-placement-mode]").forEach((element) => {
-      element.addEventListener("change", (event) => {
-        this._placementMode = event.currentTarget.value || "surface";
-        const status = this.shadowRoot.querySelector("[data-model-status]");
-        if (status && this._mode === "edit") {
-          status.hidden = false;
-          status.textContent = this._placementModeText();
-        }
-      });
-    });
-
     this._bindZoneTools();
     this._bindModelViewTools();
-
-    this.shadowRoot.querySelectorAll("[data-auto-place]").forEach((element) => {
-      element.addEventListener("click", (event) => {
-        this._autoPlaceMarkers(event.currentTarget.dataset.autoPlace);
-      });
-    });
 
     this.shadowRoot.querySelectorAll("[data-nudge]").forEach((element) => {
       element.addEventListener("click", (event) => {
@@ -2324,6 +2211,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         this._render();
       });
     }
+
+    // Re-render the marker panel so its own controls get bound (views, layers, groups).
+    this._refreshSelectedMarkerPanel();
   }
 
   _pointFromEvent(element, event) {
@@ -2332,22 +2222,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       x: Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100)),
       y: Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100)),
     };
-  }
-
-  _bindModelViewControls(root = this.shadowRoot) {
-    root?.querySelectorAll?.("[data-model-view]").forEach((element) => {
-      element.addEventListener("click", (event) => {
-        this._setModelView(event.currentTarget.dataset.modelView);
-      });
-    });
-
-    root?.querySelectorAll?.("[data-model-default-view]").forEach((element) => {
-      element.addEventListener("click", (event) => {
-        const action = event.currentTarget.dataset.modelDefaultView;
-        if (action === "save") this._saveCurrentModelDefaultView();
-        if (action === "clear") this._clearCurrentModelDefaultView();
-      });
-    });
   }
 
   _selectionBoxTemplate() {
@@ -2650,45 +2524,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._render();
   }
 
-  _autoPlaceMarkers(scope) {
-    const rows = this._deviceRows();
-    const sourceRows = scope === "all" ? rows : this._filteredRows(rows);
-    const unplaced = sourceRows.filter((row) => !this._markers[row.key]);
-    if (!unplaced.length) return;
-
-    const columns = Math.ceil(Math.sqrt(unplaced.length));
-    const rowsCount = Math.ceil(unplaced.length / columns);
-    const xMin = 8;
-    const xMax = 92;
-    const yMin = 8;
-    const yMax = 92;
-    const xStep = columns > 1 ? (xMax - xMin) / (columns - 1) : 0;
-    const yStep = rowsCount > 1 ? (yMax - yMin) / (rowsCount - 1) : 0;
-
-    this._pushMarkerHistory();
-    this._selectedMarkers.clear();
-
-    unplaced.forEach((row, index) => {
-      const column = index % columns;
-      const rowIndex = Math.floor(index / columns);
-      const jitterX = columns > 1 ? (Math.random() - 0.5) * Math.min(4, xStep * 0.35) : 0;
-      const jitterY = rowsCount > 1 ? (Math.random() - 0.5) * Math.min(4, yStep * 0.35) : 0;
-
-      this._markers[row.key] = {
-        key: row.key,
-        entityId: row.entityId,
-        name: row.name,
-        icon: this._markers[row.key]?.icon || "",
-        x: Math.max(0, Math.min(100, xMin + xStep * column + jitterX)),
-        y: Math.max(0, Math.min(100, yMin + yStep * rowIndex + jitterY)),
-      };
-      this._selectedMarkers.add(row.key);
-    });
-
-    this._saveMarkers();
-    this._render();
-  }
-
   _offlineMarkersByFloor(rowByKey) {
     return this._floors
       .flatMap((floor) => {
@@ -2986,20 +2821,33 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _zoneToolsTemplate() {
     const zones = Object.values(this._zones || {}).sort((a, b) => a.name.localeCompare(b.name));
-    const activeZone = this._zones[this._activeZoneId] || zones[0] || null;
-    if (activeZone && !this._activeZoneId) this._activeZoneId = activeZone.id;
-    if (!zones.length) {
-      return `<div class="zone-empty">Add an area, then click the room corners on the 3D model.</div>`;
+    const activeZone = this._areaDetailOpen ? this._zones[this._activeZoneId] : null;
+    if (!activeZone) {
+      return `
+        <div class="sidebar-list-header">
+          <strong>Brightness areas</strong>
+          <button type="button" class="sidebar-add" data-zone-add><ha-icon icon="mdi:plus"></ha-icon>Add area</button>
+        </div>
+        <div class="sidebar-list">
+          ${zones.map((zone) => `
+            <button type="button" class="sidebar-row" data-zone-open="${this._escape(zone.id)}">
+              <span class="swatch" style="background: ${this._escape(zone.color || "#f8d66d")}"></span>
+              <span class="device-text">
+                <strong>${this._escape(zone.name)}</strong>
+                <small>${zone.points.length} point${zone.points.length === 1 ? "" : "s"} · ${zone.lightingMode === "positional" ? "Positional" : "Area glow"}</small>
+              </span>
+              <ha-icon class="row-chevron" icon="mdi:chevron-right"></ha-icon>
+            </button>
+          `).join("") || `<div class="empty-list">No areas yet. Add one, then click the room corners on the model.</div>`}
+        </div>
+      `;
     }
 
     return `
-      <label>
-        <span>Area</span>
-        <select data-zone-select>
-          ${zones.map((zone) => `<option value="${this._escape(zone.id)}" ${zone.id === this._activeZoneId ? "selected" : ""}>${this._escape(zone.name)}</option>`).join("")}
-        </select>
-      </label>
-      ${activeZone ? `
+      <div class="sidebar-detail-header">
+        <button type="button" class="sidebar-back" data-zone-back><ha-icon icon="mdi:arrow-left"></ha-icon>Areas</button>
+      </div>
+      <strong class="sidebar-detail-title">${this._escape(activeZone.name)}</strong>
       <label>
         <span>Name</span>
         <input data-zone-name="${this._escape(activeZone.id)}" value="${this._escape(activeZone.name)}" />
@@ -3025,13 +2873,12 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       </label>
       ${this._zoneShadeTemplate(activeZone)}
       <div class="zone-actions">
-        <button type="button" data-zone-draw="${this._escape(activeZone.id)}">${this._zoneDrawing && this._activeZoneId === activeZone.id ? "Stop Drawing" : "Draw"}</button>
-        <button type="button" data-zone-clear="${this._escape(activeZone.id)}">Clear Points</button>
-        <button type="button" data-zone-remove="${this._escape(activeZone.id)}">Remove</button>
+        <button type="button" class="${this._zoneDrawing && this._activeZoneId === activeZone.id ? "active" : ""}" data-zone-draw="${this._escape(activeZone.id)}">${this._zoneDrawing && this._activeZoneId === activeZone.id ? "Stop drawing" : "Draw corners"}</button>
+        <button type="button" data-zone-clear="${this._escape(activeZone.id)}">Clear points</button>
       </div>
       <small>${this._escape(activeZone.points.length)} point${activeZone.points.length === 1 ? "" : "s"}${this._zoneDrawing && this._activeZoneId === activeZone.id ? ` - top view locked; clicks save ${this._floorAxes().map((a) => a.toUpperCase()).join("/")} only.` : ""}</small>
       ${this._zonePointEditor(activeZone)}
-      ` : ""}
+      <button type="button" class="panel-button danger" data-zone-remove="${this._escape(activeZone.id)}">Remove area</button>
     `;
   }
 
@@ -3039,11 +2886,61 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const floorViews = this._modelViews?.[this._activeFloorId || "default"] || {};
     const draft = this._modelViewDraft || { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "" };
     const value = (items, index) => items?.[index] ?? "";
+    if (!this._viewDetailOpen) {
+      const hasHome = Boolean(this._modelDefaultViews?.[this._activeFloorId || "default"]);
+      return `
+        <div class="sidebar-list-header">
+          <strong>Camera views</strong>
+          <button type="button" class="sidebar-add" data-view-new><ha-icon icon="mdi:plus"></ha-icon>New view</button>
+        </div>
+        <div class="sidebar-list">
+          <div class="sidebar-row static">
+            <span class="dot"><ha-icon icon="mdi:home-outline"></ha-icon></span>
+            <span class="device-text">
+              <strong>Home</strong>
+              <small>${hasHome ? "Startup view" : "Not set - uses the fitted model"}</small>
+            </span>
+            <span class="row-badges">
+              <button type="button" class="row-icon-button" data-view-home="save" title="Use current camera as Home" aria-label="Use current camera as Home"><ha-icon icon="mdi:content-save-outline"></ha-icon></button>
+              ${hasHome ? `<button type="button" class="row-icon-button" data-view-home="clear" title="Clear Home" aria-label="Clear Home"><ha-icon icon="mdi:delete-outline"></ha-icon></button>
+              <button type="button" class="row-icon-button" data-view-home="go" title="Go to Home" aria-label="Go to Home"><ha-icon icon="mdi:play"></ha-icon></button>` : ""}
+            </span>
+          </div>
+          ${Object.keys(floorViews).sort((a, b) => a.localeCompare(b)).map((name) => {
+            const view = floorViews[name] || {};
+            return `
+            <div class="sidebar-row" data-view-select="${this._escape(name)}" role="button" tabindex="0">
+              <span class="dot" ${view.icon_color ? `style="background: ${this._escape(view.icon_color)}"` : ""}><ha-icon icon="${this._escape(view.icon || "mdi:camera-outline")}"></ha-icon></span>
+              <span class="device-text">
+                <strong>${this._escape(name)}</strong>
+                <small>${view.icon ? "Icon on model" : "No icon"}</small>
+              </span>
+              <span class="row-badges">
+                <button type="button" class="row-icon-button" data-view-go="${this._escape(name)}" title="Go to view" aria-label="Go to ${this._escape(name)}"><ha-icon icon="mdi:play"></ha-icon></button>
+              </span>
+            </div>`;
+          }).join("")}
+        </div>
+        ${Object.keys(floorViews).length ? "" : `<div class="empty-list">Move the camera to a nice spot, then press New view.</div>`}
+      `;
+    }
+    const existing = Boolean(draft.originalName && floorViews[draft.originalName]);
     return `
+      <div class="sidebar-detail-header">
+        <button type="button" class="sidebar-back" data-view-back><ha-icon icon="mdi:arrow-left"></ha-icon>Views</button>
+      </div>
+      <strong class="sidebar-detail-title">${this._escape(existing ? draft.originalName : "New view")}</strong>
       <label>
-        <span>View name</span>
+        <span>Name</span>
         <input data-view-name value="${this._escape(draft.name || "")}" placeholder="Living room" />
       </label>
+      <div class="view-actions">
+        <button type="button" data-view-use-current>Use current camera</button>
+        <button type="button" data-view-preview>Preview</button>
+      </div>
+      <details class="sidebar-options">
+        <summary>Camera coordinates</summary>
+        <div class="sidebar-options-body">
       <div class="view-coordinate-grid">
         <strong>Position</strong>
         ${[0, 1, 2].map((index) => `
@@ -3064,6 +2961,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         <span>Zoom</span>
         <input data-view-zoom type="number" min="0.01" step="0.01" value="${this._escape(draft.zoom ?? 1)}" />
       </label>
+        </div>
+      </details>
       <label class="view-icon-picker">
         <span>View icon</span>
         <ha-icon-picker data-view-icon value="${this._escape(draft.icon || "")}"></ha-icon-picker>
@@ -3088,32 +2987,15 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         <button type="button" data-view-icon-pick class="${this._pendingViewIconPick ? "active" : ""}">${this._pendingViewIconPick ? "Click model…" : "Pick on Model"}</button>
         <button type="button" data-view-icon-position-clear>Use Target</button>
       </div>` : ""}
-      <div class="view-actions">
-        <button type="button" data-view-save>Save View</button>
-        <button type="button" data-view-clear>Clear Form</button>
-      </div>
-      <div class="saved-view-list">
-        ${Object.keys(floorViews).sort((a, b) => a.localeCompare(b)).map((name) => `
-          <div class="saved-view-row">
-            <button type="button" data-view-select="${this._escape(name)}">${floorViews[name]?.icon ? `<ha-icon icon="${this._escape(floorViews[name].icon)}"></ha-icon> ` : ""}${this._escape(name)}</button>
-            <button type="button" data-view-go="${this._escape(name)}" title="Go to view">Go</button>
-            <button type="button" data-view-remove="${this._escape(name)}" title="Remove view">Remove</button>
-          </div>
-        `).join("") || `<div class="empty-list">No named views saved</div>`}
-      </div>
+      <button type="button" class="panel-button primary" data-view-save>Save view</button>
+      ${existing ? `<button type="button" class="panel-button danger" data-view-remove="${this._escape(draft.originalName)}">Remove view</button>` : ""}
     `;
   }
 
   _refreshModelViewTools() {
     const tools = this.shadowRoot?.querySelector(".view-tools");
     if (!tools) return;
-    tools.innerHTML = `
-      <div class="zone-tools-title">
-        <strong>Camera Views</strong>
-        <button type="button" data-view-use-current>Use Current Camera</button>
-      </div>
-      ${this._modelViewToolsTemplate()}
-    `;
+    tools.innerHTML = this._modelViewToolsTemplate();
     this._bindModelViewTools(tools);
   }
 
@@ -3129,25 +3011,64 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     root?.querySelectorAll("[data-view-save]").forEach((element) => {
       element.addEventListener("click", () => this._saveNamedModelView(root));
     });
-    root?.querySelectorAll("[data-view-clear]").forEach((element) => {
+    root?.querySelectorAll("[data-view-new]").forEach((element) => {
       element.addEventListener("click", () => {
-        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "" };
+        const view = this._currentModelCameraView();
+        this._modelViewDraft = { name: "", originalName: "", position: view?.position || [], target: view?.target || [], zoom: view?.zoom || 1, icon: "", iconPosition: [], iconColor: "" };
         this._pendingViewIconPick = false;
+        this._viewDetailOpen = true;
+        this._refreshModelViewTools();
+        root.querySelector?.("[data-view-name]")?.focus();
+      });
+    });
+    root?.querySelectorAll("[data-view-back]").forEach((element) => {
+      element.addEventListener("click", () => {
+        this._pendingViewIconPick = false;
+        this._viewDetailOpen = false;
+        this._refreshModelViewTools();
+      });
+    });
+    root?.querySelectorAll("[data-view-preview]").forEach((element) => {
+      element.addEventListener("click", () => {
+        const viewer = this._modelViewer;
+        if (viewer?.camera && viewer?.controls) this._animateModelCameraView(this._modelViewDraft, viewer.camera, viewer.controls);
+      });
+    });
+    root?.querySelectorAll("[data-view-home]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const action = event.currentTarget.dataset.viewHome;
+        if (action === "go") {
+          this._setModelView("default");
+          return;
+        }
+        if (action === "save") this._saveCurrentModelDefaultView();
+        if (action === "clear") this._clearCurrentModelDefaultView();
         this._refreshModelViewTools();
       });
     });
     root?.querySelectorAll("[data-view-select]").forEach((element) => {
       element.addEventListener("click", (event) => {
+        if (event.target.closest?.("[data-view-go]")) return;
         const name = event.currentTarget.dataset.viewSelect;
         const view = this._modelViews?.[this._activeFloorId || "default"]?.[name];
         if (!view) return;
-        this._modelViewDraft = { name, position: [...view.position], target: [...view.target], zoom: view.zoom || 1, icon: view.icon || "", iconPosition: [...(view.icon_position || [])], iconColor: view.icon_color || "" };
+        this._modelViewDraft = { name, originalName: name, position: [...view.position], target: [...view.target], zoom: view.zoom || 1, icon: view.icon || "", iconPosition: [...(view.icon_position || [])], iconColor: view.icon_color || "" };
         this._pendingViewIconPick = false;
+        this._viewDetailOpen = true;
         this._refreshModelViewTools();
+      });
+      element.addEventListener("keydown", (event) => {
+        if (event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return;
+        event.preventDefault();
+        event.currentTarget.click();
       });
     });
     root?.querySelectorAll("[data-view-go]").forEach((element) => {
-      element.addEventListener("click", (event) => this._setModelView(event.currentTarget.dataset.viewGo));
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this._setModelView(event.currentTarget.dataset.viewGo);
+      });
     });
     root?.querySelectorAll("[data-view-remove]").forEach((element) => {
       element.addEventListener("click", (event) => {
@@ -3155,6 +3076,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         delete this._modelViews[this._activeFloorId || "default"]?.[name];
         this._saveModelViews();
         this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "" };
+        this._pendingViewIconPick = false;
+        this._viewDetailOpen = false;
         this._refreshModelViewTools();
         this._refresh3DMarkerOverlay();
       });
@@ -3237,6 +3160,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const icon = String(this._modelViewDraft?.icon || "").trim();
     const iconPosition = icon ? this._numberArray(this._modelViewDraft?.iconPosition, 3) : null;
     const iconColor = icon ? this._normalizeHexColor(this._modelViewDraft?.iconColor) : "";
+    const originalName = this._modelViewDraft?.originalName;
+    if (originalName && originalName !== name) delete this._modelViews[floorId][originalName];
     this._modelViews[floorId][name] = {
       position,
       target,
@@ -3245,11 +3170,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ...(iconPosition ? { icon_position: iconPosition } : {}),
       ...(iconColor ? { icon_color: iconColor } : {}),
     };
-    this._modelViewDraft = { name, position, target, zoom, icon, iconPosition: iconPosition || [], iconColor };
+    this._modelViewDraft = { name, originalName: name, position, target, zoom, icon, iconPosition: iconPosition || [], iconColor };
     this._pendingViewIconPick = false;
+    this._viewDetailOpen = false;
     this._saveModelViews();
     this._refreshModelViewTools();
-    this._refreshModelCompass();
     this._refresh3DMarkerOverlay();
   }
 
@@ -3356,13 +3281,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _refreshZoneTools() {
     const tools = this.shadowRoot?.querySelector(".zone-tools");
     if (!tools) return;
-    tools.innerHTML = `
-      <div class="zone-tools-title">
-        <strong>Brightness Areas</strong>
-        <button type="button" data-zone-add>Add Area</button>
-      </div>
-      ${this._zoneToolsTemplate()}
-    `;
+    tools.innerHTML = this._zoneToolsTemplate();
     this._bindZoneTools(tools);
   }
 
@@ -3370,10 +3289,19 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     root?.querySelectorAll("[data-zone-add]").forEach((element) => {
       element.addEventListener("click", () => this._addBrightnessZone());
     });
-    root?.querySelectorAll("[data-zone-select]").forEach((element) => {
-      element.addEventListener("change", (event) => {
-        this._activeZoneId = event.currentTarget.value;
+    root?.querySelectorAll("[data-zone-open]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        this._activeZoneId = event.currentTarget.dataset.zoneOpen;
         this._activeZonePointIndex = this._zones[this._activeZoneId]?.points?.length ? 0 : null;
+        this._areaDetailOpen = true;
+        this._refreshZoneTools();
+        this._refresh3DZonePointOverlay();
+      });
+    });
+    root?.querySelectorAll("[data-zone-back]").forEach((element) => {
+      element.addEventListener("click", () => {
+        this._setZoneDrawing(this._activeZoneId, false);
+        this._areaDetailOpen = false;
         this._refreshZoneTools();
         this._refresh3DZonePointOverlay();
       });
@@ -3519,7 +3447,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         delete this._zones[id];
         if (this._activeZoneId === id) this._activeZoneId = Object.keys(this._zones)[0] || "";
         this._activeZonePointIndex = this._zones[this._activeZoneId]?.points?.length ? 0 : null;
-        if (!this._activeZoneId) this._setZoneDrawing("", false);
+        this._setZoneDrawing(this._activeZoneId, false);
+        this._areaDetailOpen = false;
         this._saveZones();
         this._refreshZoneTools();
         this._refresh3DZoneOverlay();
@@ -3566,6 +3495,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       points: [],
     };
     this._setZoneDrawing(id, true);
+    this._areaDetailOpen = true;
     this._saveZones();
     this._refreshZoneTools();
     this._refresh3DZoneOverlay();
@@ -3659,21 +3589,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (viewName === "default") {
       const view = this._modelDefaultViews?.[this._activeFloorId || "default"];
       if (view) this._animateModelCameraView(view, viewer.camera, viewer.controls);
-      return;
     }
-
-    const direction = this._modelViewDirection(viewName, viewer.THREE);
-    if (!direction) return;
-    const { camera, controls } = viewer;
-    const target = controls.target.clone();
-    const distance = Math.max(1, camera.position.distanceTo(target));
-    this._animateModelCameraView({
-      position: target.clone().add(direction.multiplyScalar(distance)).toArray(),
-      target: target.toArray(),
-      zoom: camera.zoom,
-      near: camera.near,
-      far: camera.far,
-    }, camera, controls);
   }
 
   // The active view only changes when a view is chosen; orbiting the camera keeps it.
@@ -3739,29 +3655,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._activeRequestedModelView = name;
     this._setActiveModelView(name);
     return this._animateModelCameraView(view, this._modelViewer.camera, this._modelViewer.controls);
-  }
-
-  _modelViewDirection(viewName, THREE) {
-    const map = this._coordinateMap();
-    const vectorForDisplayAxis = (displayAxis, sign = 1) => {
-      const modelAxis = map[displayAxis] || displayAxis;
-      return new THREE.Vector3(
-        modelAxis === "x" ? sign : 0,
-        modelAxis === "y" ? sign : 0,
-        modelAxis === "z" ? sign : 0
-      );
-    };
-    const vertical = vectorForDisplayAxis(this._verticalAxis(), 1);
-    const east = vectorForDisplayAxis("x", 1);
-    const north = vectorForDisplayAxis("y", 1);
-    const views = {
-      top: vertical,
-      north: north.clone().add(vertical),
-      east: east.clone().add(vertical),
-      south: north.clone().negate().add(vertical),
-      west: east.clone().negate().add(vertical),
-    };
-    return views[viewName]?.normalize?.() || null;
   }
 
   _currentModelCameraView() {
@@ -3836,25 +3729,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (!view) return;
     this._modelDefaultViews[this._activeFloorId || "default"] = view;
     this._saveModelDefaultViews();
-    this._refreshModelCompass();
     this._showModelStatus("Startup view saved.");
   }
 
   _clearCurrentModelDefaultView() {
     delete this._modelDefaultViews[this._activeFloorId || "default"];
     this._saveModelDefaultViews();
-    this._refreshModelCompass();
     this._showModelStatus("Startup view cleared.");
-  }
-
-  _refreshModelCompass() {
-    const compass = this.shadowRoot?.querySelector(".model-compass");
-    if (!compass) return;
-    const template = document.createElement("template");
-    template.innerHTML = this._modelCompassTemplate().trim();
-    const nextCompass = template.content.firstElementChild;
-    compass.replaceWith(nextCompass);
-    this._bindModelViewControls(nextCompass);
   }
 
   _showModelStatus(message) {
@@ -3876,29 +3757,260 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     });
   }
 
+  _isSystemEntityRow(row) {
+    return row.domains.some((domain) => SYSTEM_DOMAINS.includes(domain));
+  }
+
+  _layersForNewMarker(row) {
+    const layer = this._layerById(this._activeLayer);
+    return layer && !this._layerMatchesRow(layer, row) ? [layer.id] : [];
+  }
+
+  _rowMatchesLayerFilter(row, placed) {
+    if (!this._activeLayer) return true;
+    if (this._activeLayer === NO_LAYER) {
+      return placed
+        ? !this._layers.some((layer) => this._isMarkerInLayer(row, layer.id))
+        : !this._layers.some((layer) => this._layerMatchesRow(layer, row));
+    }
+    return placed ? this._isMarkerInLayer(row, this._activeLayer) : true;
+  }
+
+  _markerListRows(rows) {
+    const filtered = this._filteredRows(rows);
+    const showSystem = this._showAllEntityTypes || this._filters.domain !== "all";
+    return {
+      placed: filtered.filter((row) => this._markers[row.key] && this._rowMatchesLayerFilter(row, true)),
+      add: filtered.filter((row) => !this._markers[row.key] && (showSystem || !this._isSystemEntityRow(row)) && this._rowMatchesLayerFilter(row, false)),
+    };
+  }
+
+  _markerListSignatureValue() {
+    return JSON.stringify([
+      this._activeFloorId,
+      this._activeLayer,
+      Object.entries(this._markers).map(([key, marker]) => [key, marker.layers || [], marker.markerDisplay || "", marker.visibleInViews || []]),
+    ]);
+  }
+
+  _markersSidebarTemplate(rows) {
+    const lists = this._markerListRows(rows);
+    const isAdd = this._markerListMode === "add";
+    const filterCount = ["availability", "domain", "integration", "area"].filter((key) => this._filters[key] && this._filters[key] !== "all").length + (this._showAllEntityTypes ? 1 : 0);
+    return `
+      <div class="segmented" role="tablist" aria-label="Marker list">
+        <button type="button" role="tab" data-marker-list-mode="placed" class="${!isAdd ? "active" : ""}" aria-selected="${!isAdd}">On map <span class="count" data-marker-count="placed">${lists.placed.length}</span></button>
+        <button type="button" role="tab" data-marker-list-mode="add" class="${isAdd ? "active" : ""}" aria-selected="${isAdd}">Add <span class="count" data-marker-count="add">${lists.add.length}</span></button>
+      </div>
+      ${this._layers.length ? `
+      <label class="sidebar-field">
+        <span>Layer</span>
+        <select data-marker-layer-filter>
+          <option value="" ${!this._activeLayer ? "selected" : ""}>All markers</option>
+          ${this._layers.map((layer) => `<option value="${this._escape(layer.id)}" ${this._activeLayer === layer.id ? "selected" : ""}>${this._escape(layer.name)}</option>`).join("")}
+          <option value="${NO_LAYER}" ${this._activeLayer === NO_LAYER ? "selected" : ""}>No layer</option>
+        </select>
+      </label>` : ""}
+      <label class="sidebar-search">
+        <ha-icon icon="mdi:magnify"></ha-icon>
+        <input data-filter="search" value="${this._escape(this._filters.search)}" placeholder="${isAdd ? "Search entities…" : "Search markers…"}" aria-label="Search" />
+      </label>
+      ${isAdd ? `
+      <details class="sidebar-options" data-add-options ${this._filtersCollapsed ? "" : "open"}>
+        <summary>Filters &amp; placement${filterCount ? ` <small>${filterCount} active</small>` : ""}</summary>
+        <div class="sidebar-options-body">
+          ${this._select("availability", "Availability", [["all", "All"], ["offline", "Offline"], ["online", "Online"]])}
+          ${this._select("domain", "Domain", [["all", "All domains"], ...this._options(rows, "domains").map((value) => [value, value])])}
+          ${this._select("integration", "Integration", [["all", "All integrations"], ...this._options(rows, "integrations").map((value) => [value, value])])}
+          ${this._select("area", "Area", [["all", "All areas"], ...this._options(rows, "areaName").map((value) => [value, value])])}
+          <label class="sidebar-check">
+            <input type="checkbox" data-show-all-entity-types ${this._showAllEntityTypes ? "checked" : ""} />
+            <span>Show automations, scripts, helpers and other system entities</span>
+          </label>
+          <label>
+            <span>Placement</span>
+            <select data-placement-mode>
+              ${[["surface", "Surface click"], ["floor", "Floor only"], ["height", "Height only"], ["auto", "Auto by view"]]
+                .map(([value, label]) => `<option value="${value}" ${this._placementMode === value ? "selected" : ""}>${label}</option>`)
+                .join("")}
+            </select>
+          </label>
+        </div>
+      </details>
+      <div class="sidebar-hint">Pick an entity, then click the model where it belongs.</div>` : ""}
+      <section class="devices" data-marker-list>${this._markerListTemplate(lists)}</section>
+    `;
+  }
+
+  _markerListTemplate(lists) {
+    this._markerListSignature = this._markerListSignatureValue();
+    const isAdd = this._markerListMode === "add";
+    const items = isAdd ? lists.add : lists.placed;
+    if (!items.length) {
+      const empty = isAdd
+        ? "No entities to add. Adjust the search or filters."
+        : this._filters.search ? "No markers match." : "No markers on this floor yet. Use Add to place one.";
+      return `<div class="empty-list">${this._escape(empty)}</div>`;
+    }
+    const layer = isAdd ? this._layerById(this._activeLayer) : null;
+    const groups = new Map();
+    const ordered = layer ? [...items].sort((a, b) => Number(this._layerMatchesRow(layer, b)) - Number(this._layerMatchesRow(layer, a))) : items;
+    ordered.forEach((row) => {
+      const group = layer ? (this._layerMatchesRow(layer, row) ? `Matches ${layer.name}` : `Other entities (adds to ${layer.name})`) : row.areaName;
+      if (!groups.has(group)) groups.set(group, []);
+      groups.get(group).push(row);
+    });
+    return [...groups.entries()]
+      .map(([group, groupRows]) => `
+        <div class="list-group-title">${this._escape(group)}</div>
+        ${groupRows.map((row) => this._deviceListItem(row)).join("")}
+      `)
+      .join("");
+  }
+
+  _refreshMarkersPanel() {
+    const panel = this.shadowRoot?.querySelector("[data-markers-panel]");
+    if (!panel) return;
+    panel.innerHTML = this._markersSidebarTemplate(this._deviceRows());
+    this._bindMarkersPanel(panel);
+  }
+
+  _refreshMarkerList() {
+    const list = this.shadowRoot?.querySelector("[data-marker-list]");
+    if (!list) return;
+    const lists = this._markerListRows(this._deviceRows());
+    list.innerHTML = this._markerListTemplate(lists);
+    this.shadowRoot.querySelectorAll("[data-marker-count]").forEach((count) => {
+      count.textContent = String(lists[count.dataset.markerCount]?.length ?? 0);
+    });
+    this._bindMarkerRows(list);
+  }
+
+  _bindMarkersPanel(root) {
+    root.querySelectorAll("[data-marker-list-mode]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        const mode = event.currentTarget.dataset.markerListMode === "add" ? "add" : "placed";
+        if (mode === this._markerListMode) return;
+        this._markerListMode = mode;
+        this._pendingDeviceKey = null;
+        this._refreshMarkersPanel();
+      });
+    });
+    root.querySelectorAll("[data-marker-layer-filter]").forEach((element) => {
+      element.addEventListener("change", (event) => this._setActiveLayer(event.currentTarget.value));
+    });
+    root.querySelectorAll("[data-filter]").forEach((element) => {
+      element.addEventListener("input", (event) => {
+        this._filters[event.currentTarget.dataset.filter] = event.currentTarget.value;
+        this._refreshMarkerList();
+      });
+    });
+    root.querySelectorAll("[data-add-options]").forEach((element) => {
+      element.addEventListener("toggle", (event) => {
+        this._filtersCollapsed = !event.currentTarget.open;
+      });
+    });
+    root.querySelectorAll("[data-show-all-entity-types]").forEach((element) => {
+      element.addEventListener("change", (event) => {
+        this._showAllEntityTypes = event.currentTarget.checked;
+        this._refreshMarkersPanel();
+      });
+    });
+    root.querySelectorAll("[data-placement-mode]").forEach((element) => {
+      element.addEventListener("change", (event) => {
+        this._placementMode = event.currentTarget.value || "surface";
+        const status = this.shadowRoot.querySelector("[data-model-status]");
+        if (status && this._mode === "edit") {
+          status.hidden = false;
+          status.textContent = this._placementModeText();
+        }
+      });
+    });
+    this._bindMarkerRows(root);
+  }
+
+  _bindMarkerRows(root) {
+    root.querySelectorAll("[data-device]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        if (event.target.closest?.("[data-locate-marker]")) return;
+        const key = event.currentTarget.dataset.device;
+        if (this._markers[key]) this._selectListMarker(key);
+        else this._startMarkerPlacement(key);
+      });
+      element.addEventListener("keydown", (event) => {
+        if (event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return;
+        event.preventDefault();
+        event.currentTarget.click();
+      });
+    });
+    root.querySelectorAll("[data-locate-marker]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this._focusMarker(event.currentTarget.dataset.locateMarker);
+      });
+    });
+  }
+
+  _selectListMarker(key) {
+    this._pendingDeviceKey = null;
+    const hasButton = this._modelViewer?.markerButtons?.some((marker) => marker.button?.dataset?.marker === key);
+    if (hasButton) {
+      this._focusMarker(key, { moveCamera: false });
+      return;
+    }
+    this._selectedMarkers.clear();
+    this._selectedMarkers.add(key);
+    this._refreshSelectedMarkerPanel();
+    this._highlightSelectedDeviceRow(key);
+  }
+
+  _startMarkerPlacement(key) {
+    this._pendingDeviceKey = this._pendingDeviceKey === key ? null : key;
+    const row = this._deviceRows().find((item) => item.key === key);
+    const status = this.shadowRoot.querySelector("[data-model-status]");
+    if (status) {
+      status.hidden = false;
+      status.textContent = this._pendingDeviceKey && row ? `Click the 3D model to place ${row.name}.` : this._placementModeText();
+    }
+    this.shadowRoot.querySelectorAll("[data-device]").forEach((rowElement) => {
+      const pending = rowElement.dataset.device === this._pendingDeviceKey;
+      rowElement.classList.toggle("is-pending", pending);
+      const badge = rowElement.querySelector(".select-marker");
+      if (badge) badge.textContent = pending ? "Click model…" : "Add";
+    });
+  }
+
   _deviceListItem(row) {
     const placed = Boolean(this._markers[row.key]);
+    const selected = placed && this._selectedMarkers.has(row.key);
     return `
-      <div class="device-row ${placed ? "is-placed" : ""} ${this._pendingDeviceKey === row.key ? "is-pending" : ""} ${row.offline ? "offline" : "online"}" draggable="${placed ? "false" : "true"}" data-device="${this._escape(row.key)}">
+      <div class="device-row ${placed ? "is-placed" : ""} ${selected ? "is-selected" : ""} ${this._pendingDeviceKey === row.key ? "is-pending" : ""} ${row.offline ? "offline" : "online"}" data-device="${this._escape(row.key)}" role="button" tabindex="0">
         ${this._deviceRowInner(row)}
       </div>
     `;
   }
 
   _deviceRowInner(row) {
-    const placed = Boolean(this._markers[row.key]);
+    const marker = this._markers[row.key];
+    const badges = marker
+      ? [
+          this._normalizeMarkerDisplay(marker.markerDisplay) === "hide" ? ["mdi:eye-off-outline", "Hidden marker"] : null,
+          (marker.visibleInViews || []).length ? ["mdi:camera-outline", "Only in some views"] : null,
+        ].filter(Boolean)
+      : [];
     return `
         <span class="dot"><ha-icon icon="${this._escape(this._markerIcon(row))}"></ha-icon></span>
         <span class="device-text">
           <strong>${this._escape(row.name)}</strong>
-          <small>${this._escape(row.areaName)} - ${this._escape(row.deviceName || row.domain || row.integration)}</small>
+          <small>${this._escape(row.entityId)}</small>
         </span>
         ${
-          placed
-            ? `<div class="row-actions">
-                <button type="button" class="remove" data-remove="${this._escape(row.key)}" title="Remove from map">Remove</button>
-              </div>`
-            : `<button type="button" class="select-marker" data-pending-device="${this._escape(row.key)}">${this._pendingDeviceKey === row.key ? "Click model…" : "Add"}</button>`
+          marker
+            ? `<span class="row-badges">
+                ${badges.map(([icon, title]) => `<ha-icon icon="${icon}" title="${title}"></ha-icon>`).join("")}
+                <button type="button" class="row-icon-button" data-locate-marker="${this._escape(row.key)}" title="Show on model" aria-label="Show ${this._escape(row.name)} on model"><ha-icon icon="mdi:crosshairs-gps"></ha-icon></button>
+              </span>`
+            : `<span class="select-marker">${this._pendingDeviceKey === row.key ? "Click model…" : "Add"}</span>`
         }
     `;
   }
@@ -4427,12 +4539,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   // A selected layer decides on its own which markers show; "All" falls back to
   // the marker's own display setting and view visibility.
   _isMarkerFilteredOut(row, { views = false } = {}) {
+    if (this._activeLayer === NO_LAYER) return this._layers.some((layer) => this._isMarkerInLayer(row, layer.id));
     if (this._activeLayer) return !this._isMarkerInLayer(row, this._activeLayer);
     return this._isMarkerHidden(row) || (views && this._isMarkerOutsideActiveView(row));
   }
 
   _setActiveLayer(id) {
-    const layerId = this._layerById(id)?.id || "";
+    const layerId = id === NO_LAYER && this._mode === "edit" ? NO_LAYER : this._layerById(id)?.id || "";
     if (layerId === this._activeLayer) return;
     this._activeLayer = layerId;
     this._refreshLayerSwitcher();
@@ -4882,6 +4995,14 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _bindDeviceRowControls(rowElement) {
+    rowElement.querySelectorAll("[data-locate-marker]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this._focusMarker(event.currentTarget.dataset.locateMarker);
+      });
+    });
+
+
     rowElement.querySelectorAll("[data-remove]").forEach((element) => {
       element.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -5499,27 +5620,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         <span class="${content.type === "value" ? "value-face" : ""}">${content.type === "value" ? this._escape(content.value) : `<ha-icon icon="${this._escape(content.icon)}"></ha-icon>`}</span>
         ${this._display.showLabels ? `<strong>${this._escape(row.name)}</strong>` : ""}
       </button>
-    `;
-  }
-
-  _modelCompassTemplate() {
-    if (this._config.show_navigation_buttons === false) return "";
-    const hasDefaultView = Boolean(this._modelDefaultViews?.[this._activeFloorId || "default"]);
-    return `
-      <div class="model-compass" aria-label="3D view compass">
-        <div class="compass-grid">
-          <button type="button" data-model-view="north" class="compass-north" title="North angled view" aria-label="North angled view">N</button>
-          <button type="button" data-model-view="west" class="compass-west" title="West angled view" aria-label="West angled view">W</button>
-          <button type="button" data-model-view="top" class="compass-top" title="Top view" aria-label="Top view">Top</button>
-          <button type="button" data-model-view="east" class="compass-east" title="East angled view" aria-label="East angled view">E</button>
-          <button type="button" data-model-view="south" class="compass-south" title="South angled view" aria-label="South angled view">S</button>
-        </div>
-        <div class="default-view-actions">
-          <button type="button" data-model-view="default" title="Go to saved startup view" aria-label="Go to saved startup view" ${hasDefaultView ? "" : "disabled"}>Home</button>
-          <button type="button" data-model-default-view="save" title="Save current camera as home startup view">Save Home</button>
-          <button type="button" data-model-default-view="clear" title="Clear saved startup view" ${hasDefaultView ? "" : "disabled"}>Clear</button>
-        </div>
-      </div>
     `;
   }
 
@@ -6928,6 +7028,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _updateDeviceRowsAfterMarkerChange() {
+    if (this._markerListSignatureValue() !== this._markerListSignature) {
+      this._refreshMarkerList();
+      return;
+    }
     this.shadowRoot?.querySelectorAll("[data-device]").forEach((row) => {
       const key = row.dataset.device;
       const placed = Boolean(this._markers[key]);
@@ -7579,7 +7683,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _build3DZonePointButtons(layer, THREE) {
     layer.innerHTML = "";
-    if (this._mode !== "edit" || this._sidebarTab !== "areas") return [];
+    if (this._mode !== "edit" || this._sidebarTab !== "areas" || !this._areaDetailOpen) return [];
     const zone = this._zones[this._activeZoneId];
     if (!zone) return [];
     return (zone.points || []).map((point, index) => {
@@ -9027,7 +9131,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       icon: existingMarker?.icon || "",
       markerDisplay: existingMarker?.markerDisplay || "",
       visibleInViews: existingMarker?.visibleInViews || [],
-      layers: existingMarker?.layers || [],
+      layers: existingMarker?.layers || this._layersForNewMarker(row),
       tapAction: existingMarker?.tapAction || "",
       holdAction: existingMarker?.holdAction || "",
       navigationPath: existingMarker?.navigationPath || "",
@@ -9519,14 +9623,321 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         }
 
         .markers-panel {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          overflow: hidden;
+        }
+
+        .markers-panel .devices {
+          flex: 1 1 auto;
+        }
+
+        .areas-panel,
+        .views-panel {
+          overflow: auto;
+        }
+
+        .areas-panel .zone-tools,
+        .views-panel .view-tools {
+          align-content: start;
+          gap: 10px;
+          border-top: 0;
+          padding: 0 2px 0 0;
+        }
+
+        .segmented {
           display: grid;
-          grid-template-rows: auto auto minmax(0, 1fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 4px;
+          border-radius: 10px;
+          background: var(--secondary-background-color, #f7f8fa);
+          padding: 4px;
+        }
+
+        .segmented button {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 6px;
+          min-height: 32px;
+          border: 0;
+          border-radius: 7px;
+          background: transparent;
+          color: var(--dmp-muted);
+          cursor: pointer;
+          font: inherit;
+          font-size: 13px;
+          font-weight: 700;
+        }
+
+        .segmented button.active {
+          background: var(--card-background-color, #fff);
+          color: var(--primary-text-color);
+          box-shadow: 0 1px 4px rgba(15, 23, 42, 0.14);
+        }
+
+        .segmented .count {
+          min-width: 18px;
+          border-radius: 999px;
+          background: var(--dmp-border);
+          font-size: 11px;
+          line-height: 18px;
+          padding: 0 5px;
+        }
+
+        .segmented button.active .count {
+          background: var(--primary-color, #03a9f4);
+          color: var(--text-primary-color, #fff);
+        }
+
+        .sidebar-field {
+          grid-template-columns: auto minmax(0, 1fr);
+          align-items: center;
           gap: 8px;
         }
 
-        .areas-panel {
+        .sidebar-field select,
+        .sidebar-options select {
+          min-height: 34px;
+        }
+
+        .sidebar-search {
+          position: relative;
+          display: block;
+        }
+
+        .sidebar-search ha-icon {
+          position: absolute;
+          top: 50%;
+          left: 10px;
+          color: var(--dmp-muted);
+          transform: translateY(-50%);
+          --mdc-icon-size: 18px;
+        }
+
+        .sidebar-search input {
+          min-height: 36px;
+          padding-left: 34px;
+        }
+
+        .sidebar-options {
+          border: 1px solid var(--dmp-border);
+          border-radius: 8px;
+        }
+
+        .sidebar-options summary {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          cursor: pointer;
+          font-size: 13px;
+          font-weight: 700;
+          list-style: none;
+          padding: 8px 10px;
+        }
+
+        .sidebar-options summary::-webkit-details-marker {
+          display: none;
+        }
+
+        .sidebar-options summary::before {
+          content: "";
+          width: 5px;
+          height: 5px;
+          border-right: 2px solid var(--dmp-muted);
+          border-bottom: 2px solid var(--dmp-muted);
+          transform: rotate(-45deg);
+          transition: transform 120ms ease;
+        }
+
+        .sidebar-options[open] summary::before {
+          transform: rotate(45deg);
+        }
+
+        .sidebar-options summary small {
+          margin-left: auto;
+          color: var(--primary-color, #03a9f4);
+          font-size: 12px;
+        }
+
+        .sidebar-options-body {
           display: grid;
-          grid-template-rows: minmax(0, 1fr);
+          gap: 8px;
+          padding: 0 10px 10px;
+        }
+
+        .sidebar-check {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          cursor: pointer;
+        }
+
+        .sidebar-check input {
+          flex: 0 0 auto;
+          margin-top: 1px;
+        }
+
+        .sidebar-check span {
+          font-weight: 600;
+        }
+
+        .sidebar-hint {
+          color: var(--dmp-muted);
+          font-size: 12px;
+        }
+
+        .list-group-title {
+          margin-top: 4px;
+          color: var(--dmp-muted);
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.04em;
+          text-transform: uppercase;
+        }
+
+        .row-badges {
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          color: var(--dmp-muted);
+          --mdc-icon-size: 16px;
+        }
+
+        .sidebar-tab-panel .row-icon-button {
+          display: grid;
+          place-items: center;
+          width: 30px;
+          min-width: 30px;
+          height: 30px;
+          min-height: 30px;
+          border: 0;
+          border-radius: 50%;
+          background: transparent;
+          color: var(--dmp-muted);
+          cursor: pointer;
+          padding: 0;
+          --mdc-icon-size: 18px;
+        }
+
+        .sidebar-tab-panel .row-icon-button:hover {
+          background: var(--secondary-background-color, #f7f8fa);
+          color: var(--primary-color, #03a9f4);
+        }
+
+        .sidebar-list-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
+
+        .sidebar-list-header strong,
+        .sidebar-detail-title {
+          color: var(--primary-text-color);
+          font-size: 15px;
+        }
+
+        .sidebar-list {
+          display: grid;
+          gap: 6px;
+        }
+
+        .sidebar-tab-panel .sidebar-add,
+        .sidebar-tab-panel .sidebar-back {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          min-height: 32px;
+          border: 0;
+          border-radius: 8px;
+          background: transparent;
+          color: var(--primary-color, #03a9f4);
+          cursor: pointer;
+          font: inherit;
+          font-size: 13px;
+          font-weight: 700;
+          padding: 0 8px;
+          --mdc-icon-size: 18px;
+        }
+
+        .sidebar-tab-panel .sidebar-back {
+          margin-left: -8px;
+          color: var(--dmp-muted);
+        }
+
+        .sidebar-tab-panel .sidebar-add:hover,
+        .sidebar-tab-panel .sidebar-back:hover {
+          background: var(--secondary-background-color, #f7f8fa);
+        }
+
+        .sidebar-tab-panel .sidebar-row {
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr) auto;
+          align-items: center;
+          gap: 10px;
+          width: 100%;
+          min-height: 48px;
+          border: 1px solid var(--dmp-border);
+          border-radius: 8px;
+          background: var(--card-background-color, #fff);
+          color: var(--primary-text-color);
+          cursor: pointer;
+          font: inherit;
+          text-align: left;
+          padding: 8px;
+        }
+
+        .sidebar-tab-panel .sidebar-row:hover,
+        .device-row:hover {
+          border-color: var(--primary-color, #03a9f4);
+        }
+
+        .sidebar-tab-panel .sidebar-row.static {
+          cursor: default;
+        }
+
+        .sidebar-tab-panel .sidebar-row.static:hover {
+          border-color: var(--dmp-border);
+        }
+
+        .swatch {
+          width: 22px;
+          height: 22px;
+          border: 1px solid rgba(0, 0, 0, 0.2);
+          border-radius: 6px;
+        }
+
+        .row-chevron {
+          color: var(--dmp-muted);
+          --mdc-icon-size: 20px;
+        }
+
+        .sidebar-detail-header {
+          display: flex;
+          align-items: center;
+        }
+
+        .sidebar-tab-panel .panel-button {
+          width: 100%;
+        }
+
+        .panel-button.primary {
+          border-color: var(--primary-color, #03a9f4);
+          background: var(--primary-color, #03a9f4);
+          color: var(--text-primary-color, #fff);
+        }
+
+        .panel-button.primary:hover {
+          background: var(--primary-color, #03a9f4);
+          filter: brightness(1.08);
+        }
+
+        .zone-tools .zone-actions button.active {
+          border-color: var(--primary-color, #03a9f4);
+          background: var(--primary-color, #03a9f4);
+          color: var(--text-primary-color, #fff);
         }
 
         .bulk-actions, .zone-tools {
@@ -9723,13 +10134,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         .device-row {
           display: grid;
           grid-template-columns: auto minmax(0, 1fr) auto;
-          align-items: start;
-          gap: 9px;
+          align-items: center;
+          gap: 10px;
           min-height: 48px;
           border: 1px solid var(--dmp-border);
           border-radius: 8px;
           background: var(--card-background-color, #fff);
-          cursor: grab;
+          cursor: pointer;
           padding: 8px;
         }
 
@@ -9766,9 +10177,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           box-shadow: 0 0 0 2px rgba(3, 169, 244, 0.28);
         }
 
-        .device-row:active {
-          cursor: grabbing;
-        }
 
         .dot, .marker span {
           display: grid;
@@ -9785,7 +10193,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         .dot {
           width: 28px;
           height: 28px;
-          margin-top: 2px;
+        }
+
+        .views-panel .dot {
+          background: var(--primary-color, #03a9f4);
         }
 
         .dot ha-icon {
@@ -10911,94 +11322,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           display: none;
         }
 
-        .model-compass {
-          position: absolute;
-          right: 12px;
-          top: 12px;
-          z-index: 7;
-          display: grid;
-          gap: 8px;
-          width: 174px;
-          pointer-events: none;
-        }
-
-        .compass-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 38px);
-          grid-template-rows: repeat(3, 38px);
-          justify-content: center;
-          gap: 4px;
-        }
-
-        .model-compass button {
-          display: grid;
-          place-items: center;
-          min-width: 0;
-          min-height: 0;
-          border: 1px solid rgba(255, 255, 255, 0.34);
-          border-radius: 6px;
-          background: rgba(15, 23, 42, 0.78);
-          color: #fff;
-          cursor: pointer;
-          font: inherit;
-          font-size: 11px;
-          font-weight: 900;
-          line-height: 1;
-          padding: 0;
-          pointer-events: auto;
-          backdrop-filter: blur(5px);
-        }
-
-        .model-compass button:hover {
-          background: rgba(37, 99, 235, 0.9);
-        }
-
-        .model-compass button:disabled {
-          cursor: not-allowed;
-          opacity: 0.42;
-        }
-
-        .compass-north {
-          grid-column: 2;
-          grid-row: 1;
-        }
-
-        .compass-top {
-          grid-column: 2;
-          grid-row: 2;
-        }
-
-        .compass-west {
-          grid-column: 1;
-          grid-row: 2;
-        }
-
-        .compass-east {
-          grid-column: 3;
-          grid-row: 2;
-        }
-
-        .compass-south {
-          grid-column: 2;
-          grid-row: 3;
-        }
-
-        .default-view-actions {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 4px;
-          width: 100%;
-        }
-
-        .default-view-actions button {
-          min-height: 28px;
-          padding: 0 6px;
-        }
-
-        .default-view-actions button:only-child {
-          grid-column: 1 / -1;
-        }
-
         .zone-lux-label {
           position: absolute;
           left: 0;
@@ -11357,12 +11680,12 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           position: absolute;
           z-index: 4;
           right: 14px;
-          top: 196px;
+          top: 14px;
           display: grid;
           align-content: start;
           gap: 8px;
           width: min(360px, calc(100% - 28px));
-          max-height: calc(100% - 210px);
+          max-height: calc(100% - 84px);
           overflow: auto;
           box-sizing: border-box;
           border: 1px solid var(--dmp-border);
@@ -12428,7 +12751,6 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <h3>Editing & Display</h3>
           <div class="editor-grid">
             ${this._checkboxInput("allow_edit", "Allow Admin Edit Mode", true)}
-            ${this._checkboxInput("show_navigation_buttons", "Show 3D Navigation Buttons", true)}
             ${this._checkboxInput("show_layer_switcher", "Show Layer Switcher", true)}
             ${this._checkboxInput("show_labels", "Show Marker Names", true)}
             ${this._checkboxInput("show_entity_state", "Use Entity State Colors", true)}
@@ -13057,7 +13379,6 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       "model_background",
       "view_mode",
       "allow_edit",
-      "show_navigation_buttons",
       "show_layer_switcher",
       "show_labels",
       "show_entity_state",
