@@ -142,6 +142,65 @@ So for the example above: values below 18 are blue, 18–21.9 are blue, 22–25.
 
 In Edit Mode, select a numeric sensor marker and use **Color thresholds** in the marker settings panel to add, edit, or remove threshold rows.
 
+## Layers
+
+Layers group markers so you can switch between, for example, lighting, climate and
+energy. When `layers` is set, a switcher appears in the bottom-left corner of the
+model with **All** plus one button per layer. Click the active layer again to go
+back to **All**.
+
+```yaml
+default_layer: lighting        # optional, defaults to All
+layers:
+  - id: lighting
+    name: Lighting
+    icon: mdi:lightbulb-group
+    domains: [light]
+    marker_display: icon       # show lights even if their marker is set to hide
+  - id: climate
+    name: Climate
+    icon: mdi:thermostat
+    domains: [climate, fan]
+    device_classes: [temperature, humidity]
+  - id: energy
+    name: Energy
+    icon: mdi:flash
+    device_classes: [power]
+    marker_display: value      # show the live reading on each marker
+```
+
+A marker belongs to a layer when its domain, device class or entity is listed in
+the layer (`domains`, `device_classes`, `entities`). You can also add it by hand:
+
+```yaml
+markers:
+  - entity: switch.bathroom_heater
+    layers: [climate]
+```
+
+In Edit Mode, the marker panel lists all layers under **Layers**. Layers that the
+marker matches automatically are shown as checked and marked *(auto)*.
+
+While a layer is selected, only its markers are shown. The marker's own `hide`
+setting and `visible_in_views` are ignored, so a lighting layer can show lights
+whose icons are normally hidden. A layer's `marker_display` (`icon` or `value`)
+overrides the marker setting while that layer is active. With **All** selected,
+markers behave as they normally do.
+
+Select a layer from another card with `hafp_layer`. Use `hafp_layer=all` to go
+back to **All**. It combines with `hafp_floor` and `hafp_view`:
+
+```yaml
+tap_action:
+  action: navigate
+  navigation_path: "#hafp_floor=ground&hafp_view=start&hafp_layer=energy"
+```
+
+Set `show_layer_switcher: false` to hide the built-in switcher and use your own
+buttons instead. A link without `hafp_layer` keeps the current layer.
+
+Layers can also be managed in the visual card editor under **Layers**.
+
 ## Named Camera Views
 
 Define additional 3D camera views next to `default_view`. A view name can then be

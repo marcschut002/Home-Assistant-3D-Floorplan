@@ -92,6 +92,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "" };
     this._activeRequestedModelView = "";
     this._activeModelView = "default";
+    this._layers = [];
+    this._activeLayer = "";
     this._leavingViewIcon = "";
     this._leavingViewIconTimer = 0;
     this._pendingViewIconPick = false;
@@ -187,6 +189,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._modelViews = this._mergedModelViews(this._configModelViews(), this._loadModelViews());
     this._activeRequestedModelView = "";
     this._activeModelView = "default";
+    this._layers = this._normalizedLayers(this._config.layers);
+    this._activeLayer = this._layerById(this._requestedLayerId() || this._config.default_layer)?.id || "";
     this._display = this._normalizedDisplay({
       markerSize: this._config.marker_size,
       showLabels: this._config.show_labels,
@@ -718,6 +722,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         icon: marker.icon || "",
         markerDisplay: this._normalizeMarkerDisplay(marker.marker_display || marker.markerDisplay),
         visibleInViews: this._normalizeViewNames(marker.visible_in_views || marker.visibleInViews),
+        layers: this._normalizeViewNames(marker.layers),
         tapAction: this._normalizeMarkerAction(marker.tap_action || marker.tapAction, "tap"),
         holdAction: this._normalizeMarkerAction(marker.hold_action || marker.holdAction, "hold"),
         navigationPath: this._normalizeNavigationPath(marker.navigation_path || marker.navigationPath),
@@ -758,6 +763,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         icon: marker.icon || "",
         markerDisplay: this._normalizeMarkerDisplay(marker.markerDisplay || marker.marker_display),
         visibleInViews: this._normalizeViewNames(marker.visibleInViews || marker.visible_in_views),
+        layers: this._normalizeViewNames(marker.layers),
         tapAction: this._normalizeMarkerAction(marker.tapAction || marker.tap_action, "tap"),
         holdAction: this._normalizeMarkerAction(marker.holdAction || marker.hold_action, "hold"),
         navigationPath: this._normalizeNavigationPath(marker.navigationPath || marker.navigation_path),
@@ -1580,6 +1586,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               <div class="model-zone-label-layer" data-zone-label-layer></div>
               <div class="model-zone-point-layer" data-zone-point-layer></div>
               ${this._modelCompassTemplate()}
+              ${this._layerSwitcherTemplate()}
               ${isEditing ? `<div class="selected-marker-panel" data-selected-marker-panel>${this._selectedMarkerPanel()}</div>` : ""}
               <div class="model-status" data-model-status>${isEditing ? "Select an entity, then click the 3D model to place it." : "Loading 3D model..."}</div>
               ${isEditing ? `<canvas class="axes-gizmo" data-axes-gizmo></canvas><div class="axes-legend">${this._axesLegendHTML()}</div>` : ""}
@@ -1666,6 +1673,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._bindOfflineAlertControls();
 
     this._bindModelViewControls();
+    this._bindLayerSwitcher();
 
     this.shadowRoot.querySelectorAll("[data-zoom]").forEach((element) => {
       element.addEventListener("click", (event) => {
@@ -3558,6 +3566,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     }, 1000);
   }
 
+  _requestedLayerId() {
+    return this._requestedNavigationParams().get("hafp_layer")?.trim() || "";
+  }
+
   _requestedModelViewName() {
     return this._requestedNavigationParams().get("hafp_view")?.trim() || "";
   }
@@ -3578,6 +3590,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _applyRequestedNavigation() {
+    const layerId = this._requestedLayerId();
+    if (layerId.toLowerCase() === "all" || this._layerById(layerId)) this._setActiveLayer(layerId);
     const floorId = this._requestedModelFloorId();
     if (floorId && floorId !== this._activeFloorId && this._floors.some((floor) => floor.id === floorId)) {
       this._setActiveFloor(floorId);
@@ -4208,7 +4222,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _markerDisplayMode(row) {
     const marker = this._markers[row?.key] || {};
     const override = this._normalizeMarkerDisplay(marker.markerDisplay);
-    if (override) return override;
+    const layer = this._activeLayer && this._isMarkerInLayer(row, this._activeLayer) ? this._layerById(this._activeLayer) : null;
+    if (layer?.markerDisplay) return layer.markerDisplay;
+    if (override && !(layer && override === "hide")) return override;
     if (row?.primaryDomain === "sensor" && ["temperature", "humidity"].includes(row.primaryDeviceClass)) return "value";
     return "icon";
   }
@@ -4225,6 +4241,108 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _isMarkerOutsideActiveView(row) {
     const views = this._markers[row?.key]?.visibleInViews;
     return Array.isArray(views) && views.length > 0 && !views.includes(this._activeModelView);
+  }
+
+  _normalizedLayers(layers) {
+    if (!Array.isArray(layers)) return [];
+    const seen = new Set();
+    return layers.flatMap((layer, index) => {
+      if (!layer || typeof layer !== "object") return [];
+      const name = String(layer.name || layer.id || `Layer ${index + 1}`).trim();
+      const id = this._layerSlug(layer.id || name) || `layer_${index + 1}`;
+      if (seen.has(id)) return [];
+      seen.add(id);
+      const markerDisplay = this._normalizeMarkerDisplay(layer.marker_display || layer.markerDisplay);
+      return [{
+        id,
+        name,
+        icon: String(layer.icon || "").trim() || "mdi:layers",
+        domains: this._normalizeViewNames(layer.domains),
+        deviceClasses: this._normalizeViewNames(layer.device_classes || layer.deviceClasses),
+        entities: this._normalizeViewNames(layer.entities),
+        markerDisplay: markerDisplay === "hide" ? "" : markerDisplay,
+      }];
+    });
+  }
+
+  _layerSlug(value) {
+    return String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "_")
+      .replace(/^_+|_+$/g, "");
+  }
+
+  _layerById(id) {
+    const layerId = this._layerSlug(id);
+    return layerId ? this._layers.find((layer) => layer.id === layerId) || null : null;
+  }
+
+  _layerMatchesRow(layer, row) {
+    if (!layer || !row) return false;
+    return layer.entities.includes(row.entityId)
+      || row.domains.some((domain) => layer.domains.includes(domain))
+      || row.deviceClasses.some((deviceClass) => layer.deviceClasses.includes(deviceClass));
+  }
+
+  _isMarkerInLayer(row, layerId) {
+    const layer = this._layerById(layerId);
+    if (!layer) return false;
+    return this._layerMatchesRow(layer, row) || (this._markers[row?.key]?.layers || []).some((id) => this._layerSlug(id) === layer.id);
+  }
+
+  // A selected layer decides on its own which markers show; "All" falls back to
+  // the marker's own display setting and view visibility.
+  _isMarkerFilteredOut(row, { views = false } = {}) {
+    if (this._activeLayer) return !this._isMarkerInLayer(row, this._activeLayer);
+    return this._isMarkerHidden(row) || (views && this._isMarkerOutsideActiveView(row));
+  }
+
+  _setActiveLayer(id) {
+    const layerId = this._layerById(id)?.id || "";
+    if (layerId === this._activeLayer) return;
+    this._activeLayer = layerId;
+    this._refreshLayerSwitcher();
+    if (this._modelViewer) {
+      this._refresh3DMarkerOverlay();
+    } else if (!this._isControlActive()) {
+      this._render();
+    }
+  }
+
+  _layerSwitcherTemplate() {
+    if (!this._layers.length || this._config.show_layer_switcher === false) return "";
+    const buttons = [{ id: "", name: "All", icon: "mdi:layers-outline" }, ...this._layers];
+    return `
+      <div class="layer-switcher" role="toolbar" aria-label="Marker layers">
+        ${buttons.map((layer) => `
+          <button type="button" data-layer="${this._escape(layer.id)}" class="${layer.id === this._activeLayer ? "active" : ""}" aria-pressed="${layer.id === this._activeLayer ? "true" : "false"}" title="${this._escape(layer.name)}">
+            <ha-icon icon="${this._escape(layer.icon)}"></ha-icon>
+            <span>${this._escape(layer.name)}</span>
+          </button>
+        `).join("")}
+      </div>
+    `;
+  }
+
+  _refreshLayerSwitcher() {
+    this.shadowRoot?.querySelectorAll(".layer-switcher [data-layer]").forEach((button) => {
+      const active = button.dataset.layer === this._activeLayer;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+
+  _bindLayerSwitcher(root = this.shadowRoot) {
+    root?.querySelectorAll(".layer-switcher [data-layer]").forEach((button) => {
+      button.addEventListener("pointerdown", (event) => event.stopPropagation());
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const id = event.currentTarget.dataset.layer;
+        this._setActiveLayer(id === this._activeLayer ? "" : id);
+      });
+    });
   }
 
   _markerFace(row) {
@@ -4508,6 +4626,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ${row ? this._iconSelect(row) : ""}
       ${row ? this._markerDisplayEditor(row) : ""}
       ${row ? this._markerViewsEditor(row) : ""}
+      ${row ? this._markerLayersEditor(row) : ""}
       ${row ? this._colorThresholdEditor(row) : ""}
       ${row ? this._actionEditor(row) : ""}
       ${row ? this._lightIntensityEditor(row) : ""}
@@ -4619,6 +4738,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       element.addEventListener("pointerdown", (event) => event.stopPropagation());
       element.addEventListener("change", (event) => {
         this._updateMarkerDisplay(event.currentTarget.dataset.markerDisplay, event.currentTarget.value);
+      });
+    });
+
+    rowElement.querySelectorAll("[data-marker-layer]").forEach((element) => {
+      element.addEventListener("pointerdown", (event) => event.stopPropagation());
+      element.addEventListener("change", (event) => {
+        this._updateMarkerLayer(event.currentTarget.dataset.markerLayer, event.currentTarget.value, event.currentTarget.checked);
       });
     });
 
@@ -5074,6 +5200,28 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     `;
   }
 
+  _markerLayersEditor(row) {
+    if (!this._layers.length) return "";
+    const selected = this._markers[row.key]?.layers || [];
+    const options = this._layers
+      .map((layer) => {
+        const automatic = this._layerMatchesRow(layer, row);
+        return `
+        <label title="${automatic ? "Matched by the layer's domains, device classes or entities" : ""}">
+          <input type="checkbox" data-marker-layer="${this._escape(row.key)}" value="${this._escape(layer.id)}" ${automatic || selected.includes(layer.id) ? "checked" : ""} ${automatic ? "disabled" : ""} />
+          <span>${this._escape(layer.name)}${automatic ? " <small>(auto)</small>" : ""}</span>
+        </label>
+      `;
+      })
+      .join("");
+    return `
+      <div class="marker-views-picker">
+        <span>Layers</span>
+        <div class="marker-views-options">${options}</div>
+      </div>
+    `;
+  }
+
   _colorThresholdEditor(row) {
     const marker = this._markers[row.key] || {};
     const thresholds = this._normalizeColorThresholds(marker.colorThresholds || marker.color_thresholds) || [];
@@ -5110,7 +5258,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _markerTemplate(row, isEditing) {
-    const hidden = this._isMarkerHidden(row);
+    const hidden = this._isMarkerFilteredOut(row);
     if (hidden && !isEditing) return "";
     const marker = this._markers[row.key];
     const size = this._display.markerSize;
@@ -5230,6 +5378,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
                     ...(marker.icon ? [`        icon: ${marker.icon}`] : []),
                     ...(marker.markerDisplay ? [`        marker_display: ${marker.markerDisplay}`] : []),
                     ...(marker.visibleInViews.length ? [`        visible_in_views: ${JSON.stringify(marker.visibleInViews)}`] : []),
+                    ...(marker.layers.length ? [`        layers: ${JSON.stringify(marker.layers)}`] : []),
                     `        tap_action: ${marker.tapAction}`,
                     `        hold_action: ${marker.holdAction}`,
                     ...(marker.navigationPath ? [`        navigation_path: ${JSON.stringify(marker.navigationPath)}`] : []),
@@ -5303,6 +5452,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               ...(marker.icon ? [`    icon: ${marker.icon}`] : []),
               ...(marker.markerDisplay ? [`    marker_display: ${marker.markerDisplay}`] : []),
               ...(marker.visibleInViews.length ? [`    visible_in_views: ${JSON.stringify(marker.visibleInViews)}`] : []),
+              ...(marker.layers.length ? [`    layers: ${JSON.stringify(marker.layers)}`] : []),
               `    tap_action: ${marker.tapAction}`,
               `    hold_action: ${marker.holdAction}`,
               ...(marker.navigationPath ? [`    navigation_path: ${JSON.stringify(marker.navigationPath)}`] : []),
@@ -5440,6 +5590,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           icon: marker.icon || "",
           markerDisplay: this._normalizeMarkerDisplay(marker.markerDisplay || marker.marker_display),
           visibleInViews: this._normalizeViewNames(marker.visibleInViews || marker.visible_in_views),
+          layers: this._normalizeViewNames(marker.layers),
           tapAction: this._exportMarkerAction(row, marker, "tap"),
           holdAction: this._exportMarkerAction(row, marker, "hold"),
           navigationPath: this._normalizeNavigationPath(marker.navigationPath || marker.navigation_path),
@@ -6228,7 +6379,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (!markerLayer) return [];
     markerLayer.innerHTML = "";
     const markerButtons = this._modelMarkerRows().flatMap(({ row, marker }) => {
-      const hidden = this._isMarkerHidden(row) || this._isMarkerOutsideActiveView(row);
+      const hidden = this._isMarkerFilteredOut(row, { views: true });
       if (hidden && this._mode !== "edit") return [];
       const button = document.createElement("button");
       button.type = "button";
@@ -8302,6 +8453,18 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._refreshDeviceRow(key);
   }
 
+  _updateMarkerLayer(key, layerId, member) {
+    if (!this._markers[key]) return;
+    const current = this._normalizeViewNames(this._markers[key].layers);
+    const next = member ? [...new Set([...current, layerId])] : current.filter((id) => id !== layerId);
+    if (next.length === current.length && next.every((id) => current.includes(id))) return;
+    this._pushMarkerHistory();
+    this._markers[key].layers = next;
+    this._saveMarkers();
+    this._refresh3DMarkerOverlay();
+    this._refreshDeviceRow(key);
+  }
+
   _colorThresholdsForMarker(key) {
     const marker = this._markers[key];
     if (!marker) return [];
@@ -8640,6 +8803,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       icon: existingMarker?.icon || "",
       markerDisplay: existingMarker?.markerDisplay || "",
       visibleInViews: existingMarker?.visibleInViews || [],
+      layers: existingMarker?.layers || [],
       tapAction: existingMarker?.tapAction || "",
       holdAction: existingMarker?.holdAction || "",
       colorThresholds: this._normalizeColorThresholds(existingMarker?.colorThresholds || existingMarker?.color_thresholds),
@@ -10635,6 +10799,60 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           color: var(--marker-active-icon-color);
         }
 
+        .layer-switcher {
+          position: absolute;
+          left: 12px;
+          bottom: 12px;
+          z-index: 7;
+          display: flex;
+          flex-wrap: wrap;
+          gap: 4px;
+          max-width: calc(100% - 24px);
+          pointer-events: none;
+        }
+
+        .layer-switcher button {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          min-height: 34px;
+          border: 1px solid rgba(255, 255, 255, 0.34);
+          border-radius: 999px;
+          background: rgba(15, 23, 42, 0.78);
+          color: #fff;
+          cursor: pointer;
+          font: inherit;
+          font-size: 12px;
+          font-weight: 700;
+          padding: 0 12px 0 8px;
+          pointer-events: auto;
+          backdrop-filter: blur(5px);
+        }
+
+        .layer-switcher button ha-icon {
+          --mdc-icon-size: 18px;
+        }
+
+        .layer-switcher button:hover {
+          background: rgba(37, 99, 235, 0.9);
+        }
+
+        .layer-switcher button.active {
+          border-color: var(--primary-color, #03a9f4);
+          background: var(--primary-color, #03a9f4);
+          color: var(--text-primary-color, #fff);
+        }
+
+        @media (max-width: 600px) {
+          .layer-switcher button {
+            padding: 0 8px;
+          }
+
+          .layer-switcher button span {
+            display: none;
+          }
+        }
+
         .model-marker.view-marker span {
           background: var(--view-marker-color, var(--primary-color, #03a9f4));
           color: #fff;
@@ -11629,7 +11847,8 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
 
         .object-config-card button[data-remove-object-item],
         .state-style-row button,
-        .floor-config-actions button[data-floor-remove] {
+        .floor-config-actions button[data-floor-remove],
+        .floor-config-actions button[data-layer-remove] {
           background: var(--error-color, #db4437);
           color: #fff;
         }
@@ -11731,10 +11950,24 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         </section>
 
         <section>
+          <h3>Layers</h3>
+          <div class="editor-help">Layers group markers behind a switcher in the bottom-left of the model. Markers join a layer through its domains, device classes or entities (comma separated), or per marker in Edit Mode.</div>
+          <div class="floor-config-list">
+            ${this._renderLayerEditors()}
+          </div>
+          <ha-button class="floor-config-add" data-layer-add>Add layer</ha-button>
+          ${Array.isArray(this._config.layers) && this._config.layers.length ? `
+          <div class="editor-grid">
+            ${this._selectInput("default_layer", "Default Layer", [["", "All"], ...this._config.layers.map((layer, index) => [String(layer.id || layer.name || `layer_${index + 1}`), String(layer.name || layer.id || `Layer ${index + 1}`)])], "")}
+          </div>` : ""}
+        </section>
+
+        <section>
           <h3>Editing & Display</h3>
           <div class="editor-grid">
             ${this._checkboxInput("allow_edit", "Allow Admin Edit Mode", true)}
             ${this._checkboxInput("show_navigation_buttons", "Show 3D Navigation Buttons", true)}
+            ${this._checkboxInput("show_layer_switcher", "Show Layer Switcher", true)}
             ${this._checkboxInput("show_labels", "Show Marker Names", true)}
             ${this._checkboxInput("show_entity_state", "Use Entity State Colors", true)}
             ${this._colorInput("marker_color", "Icon Color (State Colors Off)", "#1d8f5f")}
@@ -11862,6 +12095,66 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         </article>
       `;
     }).join("");
+  }
+
+  _renderLayerEditors() {
+    const layers = Array.isArray(this._config.layers) ? this._config.layers : [];
+    if (!layers.length) return `<div class="object-config-empty">No layers configured.</div>`;
+    const list = (value) => (Array.isArray(value) ? value : value ? [value] : []).join(", ");
+    return layers.map((layer, index) => `
+      <article class="floor-config-card">
+        <header>
+          <strong>${layer.icon ? `<ha-icon icon="${this._escape(layer.icon)}"></ha-icon> ` : ""}${this._escape(layer.name || layer.id || `Layer ${index + 1}`)}</strong>
+          <div class="floor-config-actions">
+            <ha-button data-layer-remove="${index}" aria-label="Remove layer">Remove</ha-button>
+          </div>
+        </header>
+        <div class="editor-grid">
+          <ha-input class="editor-field" data-layer-field="name" data-layer-index="${index}" label="Name" type="text" value="${this._escape(layer.name || "")}" placeholder="Lighting"></ha-input>
+          <ha-input class="editor-field" data-layer-field="id" data-layer-index="${index}" label="ID" type="text" value="${this._escape(layer.id || "")}" placeholder="lighting"></ha-input>
+          <ha-input class="editor-field" data-layer-field="icon" data-layer-index="${index}" label="Icon" type="text" value="${this._escape(layer.icon || "")}" placeholder="mdi:lightbulb-group"></ha-input>
+          <ha-select class="editor-field" data-layer-field="marker_display" data-layer-index="${index}" label="Marker Display" value="${this._escape(layer.marker_display || "")}">${[["", "Marker setting"], ["icon", "Icon"], ["value", "Value"]].map(([value, label]) => `<ha-list-item value="${value}">${label}</ha-list-item>`).join("")}</ha-select>
+          <ha-input class="editor-field" data-layer-field="domains" data-layer-index="${index}" label="Domains" type="text" value="${this._escape(list(layer.domains))}" placeholder="light"></ha-input>
+          <ha-input class="editor-field" data-layer-field="device_classes" data-layer-index="${index}" label="Device Classes" type="text" value="${this._escape(list(layer.device_classes))}" placeholder="temperature, humidity"></ha-input>
+          <ha-input class="editor-field" data-layer-field="entities" data-layer-index="${index}" label="Entities" type="text" value="${this._escape(list(layer.entities))}" placeholder="switch.heater"></ha-input>
+        </div>
+      </article>
+    `).join("");
+  }
+
+  _handleLayerInput(input) {
+    const index = Number(input.dataset.layerIndex);
+    const key = input.dataset.layerField;
+    if (!Number.isInteger(index) || !["name", "id", "icon", "marker_display", "domains", "device_classes", "entities"].includes(key)) return;
+    const nextConfig = JSON.parse(JSON.stringify(this._config || {}));
+    const layer = Array.isArray(nextConfig.layers) ? nextConfig.layers[index] : null;
+    if (!layer) return;
+    const value = ["domains", "device_classes", "entities"].includes(key)
+      ? String(input.value || "").split(",").map((item) => item.trim()).filter(Boolean)
+      : String(input.value || "").trim();
+    if (Array.isArray(value) ? value.length : value) layer[key] = value;
+    else delete layer[key];
+    this._commitConfig(nextConfig);
+    if (key === "name" || key === "id" || key === "icon") this._render();
+  }
+
+  _addLayer() {
+    const nextConfig = JSON.parse(JSON.stringify(this._config || {}));
+    if (!Array.isArray(nextConfig.layers)) nextConfig.layers = [];
+    const index = nextConfig.layers.length;
+    nextConfig.layers.push({ id: `layer_${index + 1}`, name: `Layer ${index + 1}`, icon: "mdi:layers" });
+    this._commitConfig(nextConfig);
+    this._render();
+  }
+
+  _removeLayer(index) {
+    const nextConfig = JSON.parse(JSON.stringify(this._config || {}));
+    if (!Array.isArray(nextConfig.layers) || !nextConfig.layers[index]) return;
+    const [removed] = nextConfig.layers.splice(index, 1);
+    if (!nextConfig.layers.length) delete nextConfig.layers;
+    if (nextConfig.default_layer && nextConfig.default_layer === (removed.id || removed.name)) delete nextConfig.default_layer;
+    this._commitConfig(nextConfig);
+    this._render();
   }
 
   _handleFloorInput(input) {
@@ -12028,6 +12321,13 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
     this.querySelector("[data-floor-add]")?.addEventListener("click", () => this._addFloor());
     this.querySelectorAll("[data-floor-field]").forEach((input) => {
       input.addEventListener("change", (event) => this._handleFloorInput(event.currentTarget));
+    });
+    this.querySelectorAll("[data-layer-remove]").forEach((button) => {
+      button.addEventListener("click", () => this._removeLayer(Number(button.dataset.layerRemove)));
+    });
+    this.querySelector("[data-layer-add]")?.addEventListener("click", () => this._addLayer());
+    this.querySelectorAll("[data-layer-field]").forEach((input) => {
+      input.addEventListener("change", (event) => this._handleLayerInput(event.currentTarget));
     });
     this.querySelectorAll("[data-config-key]").forEach((element) => {
       const eventName = element.type === "checkbox" ? "change" : "change";
@@ -12263,6 +12563,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       "view_mode",
       "allow_edit",
       "show_navigation_buttons",
+      "show_layer_switcher",
       "show_labels",
       "show_entity_state",
       "marker_color",
@@ -12297,6 +12598,8 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       "animations",
       "interactive_objects",
       "views",
+      "layers",
+      "default_layer",
     ];
 
     directKeys.forEach((key) => {
