@@ -285,14 +285,16 @@ Set `allow_edit: false` to turn editing off completely.
 
 **Views** - open the **Views** mode, position the camera in the 3D model, and press **Use Current Camera**. Enter a name and press **Save View**. Saved views can be selected for editing, previewed with **Go**, or removed. Views are stored per floor and included in the YAML export.
 
-**Floating panel** - selecting a placed marker opens a panel on the right with:
-- Icon picker
-- Marker display setting
-- Visible in views (only shown when the floor has named views)
-- Tap / Hold actions
-- Light intensity, type, radius, and render parameters (for `light.*` entities in Positional zones)
-- XYZ coordinates
-- Move / Delete buttons
+**Marker panel** - selecting a placed marker opens a panel on the right. Its
+settings are grouped in collapsible sections, each showing a short summary when
+closed:
+- **Appearance** - icon, marker display (auto, icon, value or hide) and color thresholds
+- **Visibility** - views and layers, as chips you click on or off
+- **Actions** - tap and hold actions, plus a navigation path when either is set to Navigate
+- **Light** - intensity, type, radius and render parameters (for `light.*` entities)
+- **Position** - X/Y/Z coordinates and **Move on model**
+
+**Remove marker** is at the bottom. Close the panel with ✕ or Esc.
 
 <img src="images/Marker%20Settings.png" alt="Marker settings panel" width="350" />
 

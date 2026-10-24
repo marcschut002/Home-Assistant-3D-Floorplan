@@ -73,6 +73,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._suppressMapRestoreUntil = 0;
     this._selectedMarkers = new Set();
     this._advancedRenderParamsOpen = new Set();
+    this._openMarkerPanelGroups = new Set(["appearance"]);
     this._pendingDeviceKey = null;
     this._pendingSubSpot = null;
     this._pendingLightPath = null;
@@ -3923,6 +3924,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         `;
           })
           .join("")}
+        ${["tap", "hold"].some((type) => this._exportMarkerAction(row, this._markers[row.key] || {}, type) === "navigate") ? `
+        <label class="navigation-path-editor">
+          <span>Navigation path</span>
+          <input data-marker-navigation-path="${this._escape(row.key)}" type="text" value="${this._escape(this._markers[row.key]?.navigationPath || "")}" placeholder="#hafp_view=keuken or /lovelace/room" />
+        </label>` : ""}
       </div>
     `;
   }
@@ -4737,26 +4743,21 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _selectedMarkerPanel() {
     const key = [...this._selectedMarkers][0];
     if (!key || this._selectedMarkers.size !== 1 || !this._markers[key]) {
-      return `<div class="selected-empty">Select a placed marker to edit coordinates.</div>`;
+      return `<div class="selected-empty">Select a placed marker to edit it.</div>`;
     }
     const row = this._deviceRows().find((item) => item.key === key);
-    const name = row?.name || this._markers[key].name || key;
-    const displayPoint = this._modelToDisplayPoint(this._markers[key]);
-    return `
-      <div class="selected-title">
-        <strong>${this._escape(name)}</strong>
-        <div class="selected-title-actions">
-          <button type="button" data-edit-marker="${this._escape(key)}">Move</button>
-          <button type="button" class="remove" data-remove="${this._escape(key)}">Remove</button>
-        </div>
-      </div>
-      ${row ? this._iconSelect(row) : ""}
-      ${row ? this._markerDisplayEditor(row) : ""}
-      ${row ? this._markerViewsEditor(row) : ""}
-      ${row ? this._markerLayersEditor(row) : ""}
-      ${row ? this._colorThresholdEditor(row) : ""}
-      ${row ? this._actionEditor(row) : ""}
-      ${row ? this._lightIntensityEditor(row) : ""}
+    const marker = this._markers[key];
+    const name = row?.name || marker.name || key;
+    const displayPoint = this._modelToDisplayPoint(marker);
+    const groups = row
+      ? [
+          ["appearance", "Appearance", this._appearanceSummary(row), `${this._iconSelect(row)}${this._markerDisplayEditor(row)}${this._colorThresholdEditor(row)}`],
+          ["visibility", "Visibility", this._visibilitySummary(row), `${this._markerViewsEditor(row)}${this._markerLayersEditor(row)}`],
+          ["actions", "Actions", this._actionsSummary(row), this._actionEditor(row)],
+          ["light", "Light", this._lightSummary(row), this._lightIntensityEditor(row)],
+        ].filter(([, , , body]) => body.trim())
+      : [];
+    const positionBody = `
       <div class="coordinate-editor selected-coordinates">
         ${["x", "y", "z"]
           .map(
@@ -4769,7 +4770,68 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           )
           .join("")}
       </div>
+      <button type="button" class="panel-button" data-edit-marker="${this._escape(key)}">Move on model</button>
     `;
+    const positionSummary = ["x", "y", "z"].map((axis) => Number(Number(displayPoint[axis]).toFixed(2))).join(" · ");
+    return `
+      <div class="selected-title">
+        <div class="selected-title-text">
+          <strong>${this._escape(name)}</strong>
+          <small>${this._escape(row?.entityId || key)}</small>
+        </div>
+        <button type="button" class="panel-icon-button" data-deselect-marker title="Close" aria-label="Close marker settings"><ha-icon icon="mdi:close"></ha-icon></button>
+      </div>
+      ${[...groups, ["position", "Position", positionSummary, positionBody]]
+        .map(([id, label, summary, body]) => this._markerPanelGroup(id, label, summary, body))
+        .join("")}
+      <button type="button" class="panel-button danger" data-remove="${this._escape(key)}">Remove marker</button>
+    `;
+  }
+
+  _markerPanelGroup(id, label, summary, body) {
+    return `
+      <details class="panel-group" data-panel-group="${this._escape(id)}" ${this._openMarkerPanelGroups.has(id) ? "open" : ""}>
+        <summary>
+          <span>${this._escape(label)}</span>
+          <small>${this._escape(summary)}</small>
+        </summary>
+        <div class="panel-group-body">${body}</div>
+      </details>
+    `;
+  }
+
+  _appearanceSummary(row) {
+    const marker = this._markers[row.key] || {};
+    const display = this._normalizeMarkerDisplay(marker.markerDisplay);
+    const labels = { icon: "Icon", value: "Value", hide: "Hidden" };
+    const parts = [display ? labels[display] : "Auto"];
+    if (marker.icon) parts.push(marker.icon.replace(/^mdi:/, ""));
+    if (this._normalizeColorThresholds(marker.colorThresholds)?.length) parts.push("thresholds");
+    return parts.join(" · ");
+  }
+
+  _visibilitySummary(row) {
+    const views = (this._markers[row.key]?.visibleInViews || []).length;
+    const layers = this._layers.filter((layer) => this._isMarkerInLayer(row, layer.id)).length;
+    const parts = [];
+    if (views) parts.push(`${views} view${views === 1 ? "" : "s"}`);
+    if (layers) parts.push(`${layers} layer${layers === 1 ? "" : "s"}`);
+    return parts.join(" · ") || "Always";
+  }
+
+  _actionsSummary(row) {
+    const label = (type) => {
+      const action = this._exportMarkerAction(row, this._markers[row.key] || {}, type);
+      return this._markerActionOptions(type).find(([value]) => value === action)?.[1] || action;
+    };
+    return `${label("tap")} · ${label("hold")}`;
+  }
+
+  _lightSummary(row) {
+    if (row?.primaryDomain !== "light") return "";
+    const marker = this._markers[row.key] || {};
+    const lightType = this._normalizeLightType(marker.lightType);
+    return [`${this._normalizeLightIntensity(marker.lightIntensity)}%`, lightType].filter(Boolean).join(" · ");
   }
 
   _refreshDeviceRow(key) {
@@ -4865,6 +4927,30 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       element.addEventListener("pointerdown", (event) => event.stopPropagation());
       element.addEventListener("change", (event) => {
         this._updateMarkerDisplay(event.currentTarget.dataset.markerDisplay, event.currentTarget.value);
+      });
+    });
+
+    rowElement.querySelectorAll("[data-panel-group]").forEach((element) => {
+      element.addEventListener("toggle", (event) => {
+        const id = event.currentTarget.dataset.panelGroup;
+        if (event.currentTarget.open) this._openMarkerPanelGroups.add(id);
+        else this._openMarkerPanelGroups.delete(id);
+      });
+    });
+
+    rowElement.querySelectorAll("[data-deselect-marker]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this._selectedMarkers.clear();
+        this.shadowRoot?.querySelectorAll("[data-device].is-selected").forEach((row) => row.classList.remove("is-selected"));
+        this._refreshSelectedMarkerPanel();
+      });
+    });
+
+    rowElement.querySelectorAll("[data-marker-navigation-path]").forEach((element) => {
+      element.addEventListener("pointerdown", (event) => event.stopPropagation());
+      element.addEventListener("change", (event) => {
+        this._updateMarkerNavigationPath(event.currentTarget.dataset.markerNavigationPath, event.currentTarget.value);
       });
     });
 
@@ -8544,6 +8630,15 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (this._selectedMarkers.has(key)) this._refreshSelectedMarkerPanel();
   }
 
+  _updateMarkerNavigationPath(key, value) {
+    if (!this._markers[key]) return;
+    const path = this._normalizeNavigationPath(value);
+    if ((this._markers[key].navigationPath || "") === path) return;
+    this._pushMarkerHistory();
+    this._markers[key].navigationPath = path;
+    this._saveMarkers();
+  }
+
   _updateMarkerIcon(key, value) {
     if (!this._markers[key]) return;
     const icon = String(value || "").trim();
@@ -8578,6 +8673,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._saveMarkers();
     this._refresh3DMarkerOverlay();
     this._refreshDeviceRow(key);
+    if (this._selectedMarkers.has(key)) this._refreshSelectedMarkerPanel();
   }
 
   _updateMarkerLayer(key, layerId, member) {
@@ -8590,6 +8686,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._saveMarkers();
     this._refresh3DMarkerOverlay();
     this._refreshDeviceRow(key);
+    if (this._selectedMarkers.has(key)) this._refreshSelectedMarkerPanel();
   }
 
   _colorThresholdsForMarker(key) {
@@ -8933,6 +9030,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       layers: existingMarker?.layers || [],
       tapAction: existingMarker?.tapAction || "",
       holdAction: existingMarker?.holdAction || "",
+      navigationPath: existingMarker?.navigationPath || "",
       colorThresholds: this._normalizeColorThresholds(existingMarker?.colorThresholds || existingMarker?.color_thresholds),
       lightIntensity: this._normalizeLightIntensity(existingMarker?.lightIntensity),
       lightType: this._normalizeLightType(existingMarker?.lightType),
@@ -11260,151 +11358,243 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           z-index: 4;
           right: 14px;
           top: 196px;
+          display: grid;
+          align-content: start;
+          gap: 8px;
           width: min(360px, calc(100% - 28px));
           max-height: calc(100% - 210px);
           overflow: auto;
-          border: 1px solid rgba(255, 255, 255, 0.14);
-          border-radius: 8px;
-          background: rgba(15, 23, 42, 0.78);
-          color: #fff;
+          box-sizing: border-box;
+          border: 1px solid var(--dmp-border);
+          border-radius: 12px;
+          background: var(--card-background-color, #fff);
+          color: var(--primary-text-color);
           box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
-          padding: 10px;
-          backdrop-filter: blur(6px);
+          padding: 12px;
         }
 
         .selected-empty {
-          color: rgba(255, 255, 255, 0.74);
+          color: var(--dmp-muted);
           font-size: 12px;
           font-weight: 700;
         }
 
         .selected-title {
           display: flex;
-          align-items: center;
-          gap: 8px;
+          align-items: flex-start;
           justify-content: space-between;
-          margin-bottom: 8px;
+          gap: 8px;
         }
 
-        .selected-title strong {
+        .selected-title-text {
+          display: grid;
+          gap: 2px;
+          min-width: 0;
+        }
+
+        .selected-title strong,
+        .selected-title small {
           min-width: 0;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
-          font-size: 13px;
         }
 
-        .selected-title-actions {
+        .selected-title strong {
+          font-size: 15px;
+        }
+
+        .selected-title small {
+          color: var(--dmp-muted);
+          font-size: 12px;
+        }
+
+        .panel-icon-button {
+          display: grid;
+          flex: 0 0 auto;
+          place-items: center;
+          width: 30px;
+          height: 30px;
+          border: 0;
+          border-radius: 50%;
+          background: transparent;
+          color: var(--dmp-muted);
+          cursor: pointer;
+          padding: 0;
+          --mdc-icon-size: 18px;
+        }
+
+        .panel-icon-button:hover {
+          background: var(--secondary-background-color, #f7f8fa);
+          color: var(--primary-text-color);
+        }
+
+        .panel-group {
+          border: 1px solid var(--dmp-border);
+          border-radius: 8px;
+        }
+
+        .panel-group summary {
           display: flex;
-          gap: 6px;
-          flex-shrink: 0;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+          cursor: pointer;
+          font-size: 13px;
+          font-weight: 700;
+          list-style: none;
+          padding: 9px 10px;
         }
 
-        .selected-title button {
-          border: 1px solid rgba(255, 255, 255, 0.28);
+        .panel-group summary::-webkit-details-marker {
+          display: none;
+        }
+
+        .panel-group summary::before {
+          content: "";
+          flex: 0 0 auto;
+          width: 5px;
+          height: 5px;
+          border-right: 2px solid var(--dmp-muted);
+          border-bottom: 2px solid var(--dmp-muted);
+          transform: rotate(-45deg);
+          transition: transform 120ms ease;
+        }
+
+        .panel-group[open] summary::before {
+          transform: rotate(45deg);
+        }
+
+        .panel-group summary span {
+          flex: 0 0 auto;
+        }
+
+        .panel-group summary small {
+          min-width: 0;
+          margin-left: auto;
+          overflow: hidden;
+          color: var(--dmp-muted);
+          font-size: 12px;
+          font-weight: 500;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .panel-group-body {
+          display: grid;
+          gap: 12px;
+          padding: 2px 10px 12px;
+        }
+
+        .panel-group-body > *,
+        .panel-group-body .coordinate-editor {
+          grid-column: auto;
+          margin: 0;
+        }
+
+        .selected-marker-panel :is(.icon-picker, .marker-display-picker, .action-editor label, .light-intensity-editor, .light-type-editor, .light-radius-editor, .marker-views-picker) > span,
+        .selected-marker-panel .coordinate-editor span {
+          color: var(--dmp-muted);
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .selected-marker-panel :is(select, input[type="text"], input[type="number"]) {
+          box-sizing: border-box;
+          min-width: 0;
+          min-height: 32px;
+          border: 1px solid var(--dmp-border);
+          border-radius: 6px;
+          background: var(--secondary-background-color, #f7f8fa);
+          color: var(--primary-text-color);
+          font: inherit;
+          font-size: 13px;
+          padding: 0 8px;
+        }
+
+        .navigation-path-editor {
+          grid-column: 1 / -1;
+          display: grid;
+          gap: 3px;
+        }
+
+        .navigation-path-editor span {
+          color: var(--dmp-muted);
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .selected-marker-panel .marker-views-options {
+          gap: 6px;
+        }
+
+        .selected-marker-panel .marker-views-options label {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          min-height: 28px;
+          border: 1px solid var(--dmp-border);
           border-radius: 999px;
-          background: rgba(255, 255, 255, 0.08);
-          color: #fff;
+          color: var(--primary-text-color);
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 600;
+          padding: 0 10px;
+        }
+
+        .selected-marker-panel .marker-views-options input {
+          position: absolute;
+          width: 1px;
+          height: 1px;
+          opacity: 0;
+          pointer-events: none;
+        }
+
+        .selected-marker-panel .marker-views-options label:has(input:checked) {
+          border-color: var(--primary-color, #03a9f4);
+          background: var(--primary-color, #03a9f4);
+          color: var(--text-primary-color, #fff);
+        }
+
+        .selected-marker-panel .marker-views-options label:has(input:disabled) {
+          cursor: default;
+        }
+
+        .selected-marker-panel .marker-views-options label:has(input:focus-visible) {
+          outline: 2px solid var(--primary-color, #03a9f4);
+          outline-offset: 2px;
+        }
+
+        .selected-marker-panel .marker-views-options small {
+          color: inherit;
+          opacity: 0.8;
+        }
+
+        .panel-button {
+          min-height: 34px;
+          border: 1px solid var(--dmp-border);
+          border-radius: 8px;
+          background: transparent;
+          color: var(--primary-text-color);
           cursor: pointer;
           font: inherit;
-          font-size: 12px;
-          padding: 4px 9px;
+          font-size: 13px;
+          font-weight: 600;
+          padding: 0 12px;
         }
 
-        .selected-title button[data-edit-marker] {
-          border-color: rgba(248, 214, 109, 0.65);
-          background: rgba(248, 214, 109, 0.14);
-          color: #fde68a;
+        .panel-button:hover {
+          background: var(--secondary-background-color, #f7f8fa);
         }
 
-        .selected-title button[data-edit-marker]:hover {
-          background: rgba(248, 214, 109, 0.28);
+        .panel-button.danger {
+          border-color: color-mix(in srgb, var(--error-color, #db4437) 55%, transparent);
+          color: var(--error-color, #db4437);
         }
 
-        .selected-title button.remove {
-          border-color: rgba(239, 68, 68, 0.5);
-          background: rgba(239, 68, 68, 0.12);
-          color: #fca5a5;
-        }
-        .selected-title button.remove:hover {
-          background: rgba(239, 68, 68, 0.30);
-        }
-
-        .selected-marker-panel .coordinate-editor {
-          grid-column: auto;
-        }
-
-        .selected-marker-panel .action-editor {
-          grid-column: auto;
-          margin-bottom: 8px;
-        }
-
-        .selected-marker-panel .light-intensity-editor {
-          grid-column: auto;
-          margin-bottom: 8px;
-        }
-
-        .selected-marker-panel .marker-display-picker {
-          grid-column: auto;
-          margin-bottom: 8px;
-        }
-
-        .selected-marker-panel .color-threshold-editor {
-          grid-column: auto;
-        }
-
-        .selected-marker-panel .color-threshold-header span,
-        .selected-marker-panel .color-threshold-empty {
-          color: rgba(255, 255, 255, 0.72);
-        }
-
-        .selected-marker-panel .color-threshold-header button,
-        .selected-marker-panel .color-threshold-row button,
-        .selected-marker-panel .color-threshold-row input {
-          border-color: rgba(255, 255, 255, 0.22);
-          background: rgba(15, 23, 42, 0.9);
-          color: #fff;
-        }
-
-        .selected-marker-panel .action-editor span {
-          color: rgba(255, 255, 255, 0.72);
-        }
-
-        .selected-marker-panel .action-editor select {
-          border-color: rgba(255, 255, 255, 0.22);
-          background: rgba(15, 23, 42, 0.9);
-          color: #fff;
-        }
-
-        .selected-marker-panel .marker-display-picker span {
-          color: rgba(255, 255, 255, 0.72);
-        }
-
-        .selected-marker-panel .marker-display-picker select {
-          border-color: rgba(255, 255, 255, 0.22);
-          background: rgba(15, 23, 42, 0.9);
-          color: #fff;
-        }
-
-        .selected-marker-panel .light-intensity-editor span,
-        .selected-marker-panel .light-intensity-editor small {
-          color: rgba(255, 255, 255, 0.72);
-        }
-
-        .selected-marker-panel .light-intensity-editor input {
-          border-color: rgba(255, 255, 255, 0.22);
-          background: rgba(15, 23, 42, 0.9);
-          color: #fff;
-        }
-
-        .selected-marker-panel .coordinate-editor span {
-          color: rgba(255, 255, 255, 0.72);
-        }
-
-        .selected-marker-panel .coordinate-editor input {
-          border-color: rgba(255, 255, 255, 0.22);
-          background: rgba(15, 23, 42, 0.9);
-          color: #fff;
+        .panel-button.danger:hover {
+          background: color-mix(in srgb, var(--error-color, #db4437) 12%, transparent);
         }
 
         .model-viewer.editable .model-status {
