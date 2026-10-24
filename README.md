@@ -261,11 +261,29 @@ Press **Save View** to keep the icon.
 
 ## Edit Mode
 
-Switch to Edit Mode to place and configure markers.
+The card has no edit buttons during normal use. Admins open the full-screen
+editor from Home Assistant's own dashboard editing:
 
-**Sidebar** - lists all HA entities. Placed markers show a **Remove** button. Unplaced markers show **Add**; clicking it then clicking the 3D model places the marker at that surface point.
+- **Masonry and panel dashboards** - while the dashboard is being edited, the card
+  shows **Markers**, **Areas** and **Views** buttons.
+- **Sections dashboards** - Home Assistant blocks clicks on cards while editing, so
+  open the card's editor (pencil) and use the buttons under **Edit Layout**.
 
-**Views** - open the **Views** tab, position the camera in the 3D model, and press **Use Current Camera**. Enter a name and press **Save View**. Saved views can be selected for editing, previewed with **Go**, or removed. Views are stored per floor and included in the YAML export.
+The editor opens full screen with the same three buttons at the top to switch
+between markers, areas and views. Close it with **✕** or **Esc** to go back. If
+something is still pending, such as a marker you are placing, the first Esc cancels
+that and the second closes the editor. Changes are saved as you make them. When the
+editor closes, other copies of the card on the page reload the new layout.
+
+The sidebar header shows the current floor, with a floor picker when the card has
+more than one floor. In each mode, only that mode's items respond to clicks in the
+model. The others are dimmed.
+
+Set `allow_edit: false` to turn editing off completely.
+
+**Sidebar (Markers)** - lists all HA entities. Placed markers show a **Remove** button. Unplaced markers show **Add**; clicking it then clicking the 3D model places the marker at that surface point.
+
+**Views** - open the **Views** mode, position the camera in the 3D model, and press **Use Current Camera**. Enter a name and press **Save View**. Saved views can be selected for editing, previewed with **Go**, or removed. Views are stored per floor and included in the YAML export.
 
 **Floating panel** - selecting a placed marker opens a panel on the right with:
 - Icon picker

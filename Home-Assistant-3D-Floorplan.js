@@ -97,6 +97,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._leavingViewIcon = "";
     this._leavingViewIconTimer = 0;
     this._pendingViewIconPick = false;
+    this._dashboardEditMode = false;
+    this._boundOpenEditorRequest = (event) => this._handleOpenEditorRequest(event);
+    this._boundLayoutChanged = (event) => this._handleLayoutChanged(event);
     this._modelViewAnimation = 0;
     this._modelLoadingUrl = "";
     this._modelLoadFailedUrl = "";
@@ -185,8 +188,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       : this._floors.some((floor) => floor.id === this._activeFloorId)
         ? this._activeFloorId
         : this._floors[0]?.id || "default";
-    this._modelDefaultViews = this._mergedModelDefaultViews(this._configModelDefaultViews(), this._loadModelDefaultViews());
-    this._modelViews = this._mergedModelViews(this._configModelViews(), this._loadModelViews());
     this._activeRequestedModelView = "";
     this._activeModelView = "default";
     this._layers = this._normalizedLayers(this._config.layers);
@@ -197,13 +198,107 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       nudgeStep: this._config.nudge_step,
       ...this._loadDisplay(),
     });
+    this._loadStoredLayout();
+    // Merge saved presets (localStorage) on top of config presets (YAML) so user presets survive JS updates
+    this._config.light_presets = { ...(this._config.light_presets || {}), ...this._loadPresets() };
+    this._render();
+  }
+
+  _loadStoredLayout() {
+    this._modelDefaultViews = this._mergedModelDefaultViews(this._configModelDefaultViews(), this._loadModelDefaultViews());
+    this._modelViews = this._mergedModelViews(this._configModelViews(), this._loadModelViews());
     this._floorMarkers = this._mergedFloorMarkers(this._configFloorMarkers(), this._loadMarkers());
     this._markers = this._floorMarkers[this._activeFloorId] || {};
     this._floorZones = this._mergedFloorZones(this._configFloorZones(), this._loadZones());
     this._zones = this._floorZones[this._activeFloorId] || {};
-    // Merge saved presets (localStorage) on top of config presets (YAML) so user presets survive JS updates
-    this._config.light_presets = { ...(this._config.light_presets || {}), ...this._loadPresets() };
+  }
+
+  // Set by Home Assistant on cards in a masonry or panel dashboard while it is being edited.
+  set preview(value) {
+    const next = Boolean(value);
+    if (next === this._dashboardEditMode) return;
+    this._dashboardEditMode = next;
+    if (!next && this._mode === "edit") {
+      this._closeEditor();
+      return;
+    }
+    if (this._config && !this._isControlActive()) this._render();
+  }
+
+  get preview() {
+    return this._dashboardEditMode;
+  }
+
+  set editMode(value) {
+    this.preview = value;
+  }
+
+  _composedAncestors() {
+    const ancestors = [];
+    // Walk the flat tree (through slots and shadow hosts), the way inertness applies.
+    let node = this.assignedSlot || this.parentNode || this.getRootNode?.()?.host;
+    while (node) {
+      ancestors.push(node);
+      node = node.assignedSlot || node.parentNode || node.host || null;
+    }
+    return ancestors;
+  }
+
+  _isInEditorPreview() {
+    return this._composedAncestors().some((node) => ["HUI-CARD-PREVIEW", "HUI-DIALOG-EDIT-CARD"].includes(node.tagName));
+  }
+
+  // Sections dashboards make cards inert while editing, so the card editor opens the editor there instead.
+  _canShowEditButtons() {
+    if (!this._canEdit() || !this._dashboardEditMode || this._isInEditorPreview()) return false;
+    return !this._composedAncestors().some((node) => node.inert || node.hasAttribute?.("inert"));
+  }
+
+  _handleOpenEditorRequest(event) {
+    if (!this._isInEditorPreview() || !this.isConnected) return;
+    this._openEditor(event.detail?.tool);
+  }
+
+  _handleLayoutChanged(event) {
+    if (event.detail?.source === this || this._mode === "edit") return;
+    if (event.detail?.storageKey !== this._storageKey()) return;
+    this._loadStoredLayout();
     this._render();
+  }
+
+  _clearEditorPendingState() {
+    this._pendingDeviceKey = null;
+    this._pendingSubSpot = null;
+    this._pendingLightPath = null;
+    this._pendingViewIconPick = false;
+    this._zoneDrawing = false;
+    this._selectedMarkers.clear();
+    this._selectionBox = null;
+  }
+
+  _hasEditorPendingState() {
+    return Boolean(this._pendingDeviceKey || this._pendingSubSpot || this._pendingLightPath || this._pendingViewIconPick || this._zoneDrawing || this._selectedMarkers.size);
+  }
+
+  _openEditor(tool) {
+    if (!this._canEdit()) return;
+    const nextTool = ["markers", "areas", "views"].includes(tool) ? tool : "markers";
+    if (this._mode === "edit" && this._sidebarTab === nextTool) return;
+    this._clearEditorPendingState();
+    this._sidebarTab = nextTool;
+    this._sidebarCollapsed = false;
+    this._mode = "edit";
+    this._render();
+  }
+
+  _closeEditor() {
+    if (this._mode !== "edit") return;
+    this._clearEditorPendingState();
+    this._mode = "user";
+    this._render();
+    window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-layout-changed", {
+      detail: { source: this, storageKey: this._storageKey() },
+    }));
   }
 
   set hass(hass) {
@@ -253,6 +348,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     window.addEventListener("keydown", this._boundKeydown, { capture: true });
     window.addEventListener("location-changed", this._boundLocationChanged);
     window.addEventListener("hashchange", this._boundHashChanged);
+    window.addEventListener("home-assistant-3d-floorplan-open-editor", this._boundOpenEditorRequest);
+    window.addEventListener("home-assistant-3d-floorplan-layout-changed", this._boundLayoutChanged);
     document.addEventListener("visibilitychange", this._boundVisibilityChange);
     this._queueModelViewerRecovery();
   }
@@ -261,6 +358,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     window.removeEventListener("keydown", this._boundKeydown, { capture: true });
     window.removeEventListener("location-changed", this._boundLocationChanged);
     window.removeEventListener("hashchange", this._boundHashChanged);
+    window.removeEventListener("home-assistant-3d-floorplan-open-editor", this._boundOpenEditorRequest);
+    window.removeEventListener("home-assistant-3d-floorplan-layout-changed", this._boundLayoutChanged);
     document.removeEventListener("visibilitychange", this._boundVisibilityChange);
     window.clearTimeout(this._modelRecoveryTimer);
     this._disposeModelViewer();
@@ -317,6 +416,18 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _handleKeydown(event) {
+    if (event.key === "Escape" && this._mode === "edit") {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      if (this._hasEditorPendingState()) {
+        this._clearEditorPendingState();
+        this._render();
+      } else {
+        this._closeEditor();
+      }
+      return;
+    }
     const path = event.composedPath?.() || [];
     if (path.some((node) => ["INPUT", "SELECT", "TEXTAREA"].includes(node?.tagName) || node?.isContentEditable)) return;
     const active = this.shadowRoot?.activeElement || document.activeElement;
@@ -1459,22 +1570,26 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       this._zoneDrawing = false;
     }
     const isEditing = canEdit && this._mode === "edit";
-    const modeLabel = isEditing ? "Edit Mode" : "User Mode";
+    const showEditButtons = isEditing || this._canShowEditButtons();
     const activeModel = activeFloor.model || this._config.model || "";
     const isModelView = Boolean(activeModel);
 
     this.shadowRoot.innerHTML = `
       <ha-card>
+        ${isEditing ? `<div class="edit-placeholder">Editing ${this._escape(this._sidebarTab)} in full screen…</div><dialog class="edit-overlay" data-edit-overlay aria-label="Edit floorplan">` : ""}
         <div class="panel ${isEditing ? "editing" : "viewing"} ${isEditing && this._sidebarCollapsed ? "sidebar-collapsed" : ""}">
           ${
             isEditing && !this._sidebarCollapsed
               ? `
           <aside>
-            <div class="sidebar-status">${this._escape(modeLabel)} - ${placedRows.length} placed / ${offlineCount} offline</div>
-            <div class="sidebar-tabs" role="tablist" aria-label="Edit tools">
-              <button type="button" data-sidebar-tab="markers" class="${this._sidebarTab === "markers" ? "active" : ""}">Markers</button>
-              <button type="button" data-sidebar-tab="areas" class="${this._sidebarTab === "areas" ? "active" : ""}">Areas</button>
-              <button type="button" data-sidebar-tab="views" class="${this._sidebarTab === "views" ? "active" : ""}">Views</button>
+            <div class="sidebar-status">
+              ${this._floors.length > 1
+                ? `<label class="floor-select">
+                <span>Floor</span>
+                <select data-floor>${this._floors.map((floor) => `<option value="${this._escape(floor.id)}" ${floor.id === activeFloor.id ? "selected" : ""}>${this._escape(floor.name)}</option>`).join("")}</select>
+              </label>`
+                : `<strong>${this._escape(activeFloor.name || this._config.title)}</strong>`}
+              <small>${placedRows.length} placed · ${offlineCount} offline</small>
             </div>
             ${
               this._sidebarTab === "areas"
@@ -1565,29 +1680,18 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               : ""
           }
           <main>
-            <div class="map-toolbar">
-              ${
-                canEdit
-                  ? `
-              <div class="mode-switch" aria-label="Map mode">
-                <button type="button" data-mode="user" class="${!isEditing ? "active" : ""}">User Mode</button>
-                <button type="button" data-mode="edit" class="${isEditing ? "active" : ""}">Edit Mode</button>
-              </div>
-              `
-                  : ""
-              }
-            </div>
+            ${showEditButtons ? `<div class="map-toolbar">${this._editToolSwitchTemplate(isEditing)}</div>` : ""}
             <div data-offline-alert>${offlineMarkers.length ? this._offlineMarkerAlertTemplate(offlineMarkers) : ""}</div>
             ${
               isModelView
                 ? `
-            <div class="model-viewer ${isEditing ? "editable" : ""}" data-model-viewer data-model-url="${this._escape(activeModel)}">
+            <div class="model-viewer ${isEditing ? `editable edit-tool-${this._escape(this._sidebarTab)}` : ""}" data-model-viewer data-model-url="${this._escape(activeModel)}">
               <div class="model-marker-layer" data-model-marker-layer></div>
               <div class="model-zone-label-layer" data-zone-label-layer></div>
               <div class="model-zone-point-layer" data-zone-point-layer></div>
               ${this._modelCompassTemplate()}
               ${this._layerSwitcherTemplate()}
-              ${isEditing ? `<div class="selected-marker-panel" data-selected-marker-panel>${this._selectedMarkerPanel()}</div>` : ""}
+              ${isEditing && this._sidebarTab === "markers" ? `<div class="selected-marker-panel" data-selected-marker-panel>${this._selectedMarkerPanel()}</div>` : ""}
               <div class="model-status" data-model-status>${isEditing ? "Select an entity, then click the 3D model to place it." : "Loading 3D model..."}</div>
               ${isEditing ? `<canvas class="axes-gizmo" data-axes-gizmo></canvas><div class="axes-legend">${this._axesLegendHTML()}</div>` : ""}
             </div>
@@ -1596,10 +1700,12 @@ class HomeAssistant3DFloorplan extends HTMLElement {
             }
           </main>
         </div>
+        ${isEditing ? `</dialog>` : ""}
       </ha-card>
       ${this._styles()}
     `;
 
+    if (isEditing) this._showEditOverlay();
     this._attachEvents();
     if (isModelView) this._renderModelViewer(activeModel);
     requestAnimationFrame(() => {
@@ -1629,18 +1735,51 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     });
   }
 
+  _editToolSwitchTemplate(isEditing) {
+    const tools = [
+      ["markers", "Markers", "mdi:map-marker-multiple"],
+      ["areas", "Areas", "mdi:vector-square"],
+      ["views", "Views", "mdi:camera-outline"],
+    ];
+    return `
+      <div class="edit-tool-switch" role="toolbar" aria-label="Edit floorplan">
+        ${tools.map(([tool, label, icon]) => {
+          const active = isEditing && this._sidebarTab === tool;
+          return `<button type="button" data-edit-tool="${tool}" class="${active ? "active" : ""}" aria-pressed="${active ? "true" : "false"}" title="Edit ${label.toLowerCase()}"><ha-icon icon="${icon}"></ha-icon><span>${label}</span></button>`;
+        }).join("")}
+        ${isEditing ? `<button type="button" class="edit-close" data-edit-close title="Close editor (Esc)" aria-label="Close editor"><ha-icon icon="mdi:close"></ha-icon></button>` : ""}
+      </div>
+    `;
+  }
+
+  _showEditOverlay() {
+    const dialog = this.shadowRoot.querySelector("[data-edit-overlay]");
+    if (!dialog) return;
+    try {
+      if (!dialog.open) dialog.showModal();
+    } catch (_) {
+      dialog.classList.add("fallback-open");
+    }
+    // Esc is handled in _handleKeydown so it can cancel a pending action first.
+    dialog.addEventListener("cancel", (event) => event.preventDefault());
+  }
+
   _attachEvents() {
     const isEditing = this._canEdit() && this._mode === "edit";
 
-    this.shadowRoot.querySelectorAll("[data-mode]").forEach((element) => {
+    this.shadowRoot.querySelectorAll("[data-edit-tool]").forEach((element) => {
+      element.addEventListener("pointerdown", (event) => event.stopPropagation());
       element.addEventListener("click", (event) => {
-        this._mode = event.currentTarget.dataset.mode === "edit" ? "edit" : "user";
-        if (this._mode !== "edit") {
-          this._selectedMarkers.clear();
-          this._sidebarCollapsed = false;
-          this._zoneDrawing = false;
-        }
-        this._render();
+        event.preventDefault();
+        event.stopPropagation();
+        this._openEditor(event.currentTarget.dataset.editTool);
+      });
+    });
+
+    this.shadowRoot.querySelectorAll("[data-edit-close]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        event.preventDefault();
+        this._closeEditor();
       });
     });
 
@@ -1654,18 +1793,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this.shadowRoot.querySelectorAll("[data-sidebar-toggle]").forEach((element) => {
       element.addEventListener("click", () => {
         this._sidebarCollapsed = !this._sidebarCollapsed;
-        this._render();
-      });
-    });
-
-    this.shadowRoot.querySelectorAll("[data-sidebar-tab]").forEach((element) => {
-      element.addEventListener("click", (event) => {
-        const tab = ["markers", "areas", "views"].includes(event.currentTarget.dataset.sidebarTab)
-          ? event.currentTarget.dataset.sidebarTab
-          : "markers";
-        if (this._sidebarTab === tab) return;
-        this._sidebarTab = tab;
-        if (tab !== "areas") this._setZoneDrawing("", false);
         this._render();
       });
     });
@@ -9026,7 +9153,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           position: sticky;
           top: 12px;
           display: grid;
-          grid-template-rows: auto auto minmax(0, 1fr) auto;
+          grid-template-rows: auto minmax(0, 1fr) auto;
           gap: 8px;
           min-width: 0;
           height: calc(100vh - 24px);
@@ -9054,37 +9181,165 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         }
 
         .sidebar-status {
+          display: grid;
+          gap: 4px;
           color: var(--dmp-muted);
           font-size: 13px;
           font-weight: 700;
           line-height: 1.25;
         }
 
-        .sidebar-tabs {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 4px;
-          border-radius: 8px;
-          background: var(--secondary-background-color, #f7f8fa);
-          padding: 4px;
+        .sidebar-status strong {
+          color: var(--primary-text-color);
+          font-size: 15px;
         }
 
-        .sidebar-tabs button {
+        .sidebar-status small {
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .floor-select {
+          display: grid;
+          grid-template-columns: auto minmax(0, 1fr);
+          align-items: center;
+          gap: 8px;
+        }
+
+        .floor-select select {
+          min-height: 34px;
+          border: 1px solid var(--dmp-border);
+          border-radius: 6px;
+          background: var(--secondary-background-color, #f7f8fa);
+          color: var(--primary-text-color);
+          font: inherit;
+          font-size: 14px;
+          padding: 0 8px;
+        }
+
+        .edit-placeholder {
+          display: grid;
+          place-items: center;
+          min-height: 160px;
+          height: 100%;
+          color: var(--dmp-muted);
+          font-size: 14px;
+          font-weight: 700;
+        }
+
+        .edit-overlay {
+          position: fixed;
+          inset: 0;
+          width: 100vw;
+          height: 100vh;
+          height: 100dvh;
+          max-width: none;
+          max-height: none;
+          margin: 0;
+          padding: 0;
+          border: 0;
+          background: var(--primary-background-color, #111);
+          color: var(--primary-text-color);
+          overflow: hidden;
+          pointer-events: auto;
+        }
+
+        .edit-overlay::backdrop {
+          background: rgba(0, 0, 0, 0.55);
+        }
+
+        .edit-overlay.fallback-open {
+          display: block;
+          z-index: 10000;
+        }
+
+        .edit-overlay .panel {
+          height: 100%;
+        }
+
+        .edit-overlay aside {
+          position: static;
+          height: 100%;
+          max-height: none;
+          overflow: hidden;
+        }
+
+        .edit-overlay main {
+          display: flex;
+          flex-direction: column;
+          height: 100%;
+          min-height: 0;
+          box-sizing: border-box;
+        }
+
+        .edit-overlay .model-viewer {
+          flex: 1 1 auto;
+          height: auto;
+          max-height: none;
+          min-height: 0;
+        }
+
+        .edit-tool-switch {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          border-radius: 999px;
+          background: rgba(15, 23, 42, 0.78);
+          padding: 4px;
+          backdrop-filter: blur(5px);
+        }
+
+        .edit-tool-switch button {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
           min-height: 32px;
           border: 0;
-          border-radius: 6px;
+          border-radius: 999px;
           background: transparent;
-          color: var(--dmp-muted);
+          color: #fff;
           cursor: pointer;
           font: inherit;
           font-size: 13px;
-          font-weight: 800;
+          font-weight: 700;
+          padding: 0 12px 0 10px;
         }
 
-        .sidebar-tabs button.active {
-          background: var(--card-background-color, #fff);
-          color: var(--primary-color, #03a9f4);
-          box-shadow: 0 1px 4px rgba(15, 23, 42, 0.12);
+        .edit-tool-switch button ha-icon {
+          --mdc-icon-size: 18px;
+        }
+
+        .edit-tool-switch button:hover {
+          background: rgba(255, 255, 255, 0.14);
+        }
+
+        .edit-tool-switch button.active {
+          background: var(--primary-color, #03a9f4);
+          color: var(--text-primary-color, #fff);
+        }
+
+        .edit-tool-switch .edit-close {
+          margin-left: 4px;
+          padding: 0 8px;
+          border-left: 1px solid rgba(255, 255, 255, 0.24);
+          border-radius: 0 999px 999px 0;
+        }
+
+        @media (max-width: 600px) {
+          .edit-tool-switch button {
+            padding: 0 9px;
+          }
+
+          .edit-tool-switch button span {
+            display: none;
+          }
+        }
+
+        .edit-tool-areas .model-marker,
+        .edit-tool-views .model-marker:not(.view-marker),
+        .edit-tool-markers .model-marker.view-marker {
+          opacity: 0.3;
+          pointer-events: none;
         }
 
         .filters, .bulk-actions, .zone-tools, .view-tools {
@@ -11621,6 +11876,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
     this._markerYamlError = "";
     this._objectConfigScope = "root";
     this._editingFloorIndex = null;
+    this._editingLayerIndex = null;
   }
 
   setConfig(config) {
@@ -11879,6 +12135,12 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           text-align: center;
         }
 
+        .layout-edit-actions {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+        }
+
         .floor-config-list {
           display: grid;
           gap: 10px;
@@ -11919,6 +12181,16 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         }
       </style>
       <div class="floorplan-editor">
+        <section>
+          <h3>Edit Layout</h3>
+          <div class="editor-help">Opens the floorplan in full screen to place markers, draw areas or set up camera views. Close it with ✕ or Esc to return here.</div>
+          <div class="layout-edit-actions">
+            <ha-button data-open-layout-editor="markers">Markers</ha-button>
+            <ha-button data-open-layout-editor="areas">Areas</ha-button>
+            <ha-button data-open-layout-editor="views">Views</ha-button>
+          </div>
+        </section>
+
         <section>
           <h3>Basic</h3>
           <div class="editor-grid">
@@ -12101,14 +12373,18 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
     const layers = Array.isArray(this._config.layers) ? this._config.layers : [];
     if (!layers.length) return `<div class="object-config-empty">No layers configured.</div>`;
     const list = (value) => (Array.isArray(value) ? value : value ? [value] : []).join(", ");
-    return layers.map((layer, index) => `
+    return layers.map((layer, index) => {
+      const editing = this._editingLayerIndex === index;
+      return `
       <article class="floor-config-card">
         <header>
           <strong>${layer.icon ? `<ha-icon icon="${this._escape(layer.icon)}"></ha-icon> ` : ""}${this._escape(layer.name || layer.id || `Layer ${index + 1}`)}</strong>
           <div class="floor-config-actions">
+            <ha-button data-layer-edit="${index}" aria-label="${editing ? "Stop editing" : "Edit layer"}">${editing ? "Done" : "Edit"}</ha-button>
             <ha-button data-layer-remove="${index}" aria-label="Remove layer">Remove</ha-button>
           </div>
         </header>
+        ${editing ? `
         <div class="editor-grid">
           <ha-input class="editor-field" data-layer-field="name" data-layer-index="${index}" label="Name" type="text" value="${this._escape(layer.name || "")}" placeholder="Lighting"></ha-input>
           <ha-input class="editor-field" data-layer-field="id" data-layer-index="${index}" label="ID" type="text" value="${this._escape(layer.id || "")}" placeholder="lighting"></ha-input>
@@ -12118,8 +12394,10 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <ha-input class="editor-field" data-layer-field="device_classes" data-layer-index="${index}" label="Device Classes" type="text" value="${this._escape(list(layer.device_classes))}" placeholder="temperature, humidity"></ha-input>
           <ha-input class="editor-field" data-layer-field="entities" data-layer-index="${index}" label="Entities" type="text" value="${this._escape(list(layer.entities))}" placeholder="switch.heater"></ha-input>
         </div>
+        ` : ""}
       </article>
-    `).join("");
+    `;
+    }).join("");
   }
 
   _handleLayerInput(input) {
@@ -12143,6 +12421,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
     if (!Array.isArray(nextConfig.layers)) nextConfig.layers = [];
     const index = nextConfig.layers.length;
     nextConfig.layers.push({ id: `layer_${index + 1}`, name: `Layer ${index + 1}`, icon: "mdi:layers" });
+    this._editingLayerIndex = index;
     this._commitConfig(nextConfig);
     this._render();
   }
@@ -12153,6 +12432,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
     const [removed] = nextConfig.layers.splice(index, 1);
     if (!nextConfig.layers.length) delete nextConfig.layers;
     if (nextConfig.default_layer && nextConfig.default_layer === (removed.id || removed.name)) delete nextConfig.default_layer;
+    this._editingLayerIndex = null;
     this._commitConfig(nextConfig);
     this._render();
   }
@@ -12332,6 +12612,20 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
     this.querySelector("[data-floor-add]")?.addEventListener("click", () => this._addFloor());
     this.querySelectorAll("[data-floor-field]").forEach((input) => {
       input.addEventListener("change", (event) => this._handleFloorInput(event.currentTarget));
+    });
+    this.querySelectorAll("[data-open-layout-editor]").forEach((button) => {
+      button.addEventListener("click", () => {
+        window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-open-editor", {
+          detail: { tool: button.dataset.openLayoutEditor },
+        }));
+      });
+    });
+    this.querySelectorAll("[data-layer-edit]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const index = Number(button.dataset.layerEdit);
+        this._editingLayerIndex = this._editingLayerIndex === index ? null : index;
+        this._render();
+      });
     });
     this.querySelectorAll("[data-layer-remove]").forEach((button) => {
       button.addEventListener("click", () => this._removeLayer(Number(button.dataset.layerRemove)));
