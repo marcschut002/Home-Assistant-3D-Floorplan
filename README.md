@@ -268,8 +268,16 @@ editor from Home Assistant's own dashboard editing:
 The editor opens full screen with the same three buttons at the top to switch
 between markers, areas and views. Close it with **✕** or **Esc** to go back. If
 something is still pending, such as a marker you are placing, the first Esc cancels
-that and the second closes the editor. Changes are saved as you make them. When the
-editor closes, other copies of the card on the page reload the new layout.
+that and the second closes the editor. Changes are saved in the browser as you make
+them. When the editor closes, other copies of the card on the page reload the new
+layout.
+
+When you opened the editor from the card editor (the pencil), closing it writes the
+changed markers, brightness areas, views and Home view into the card config. Press
+**Save** in the card editor to keep them, so no YAML export is needed. If nothing
+changed, the config is left alone. Other per-floor settings, such as animations,
+stay as they are. When the editor was opened from the buttons on the card (masonry
+and panel dashboards), use **Export YAML** in the sidebar as before.
 
 The sidebar header shows the current floor, with a floor picker when the card has
 more than one floor. In each mode, only that mode's items respond to clicks in the

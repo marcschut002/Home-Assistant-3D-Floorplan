@@ -296,6 +296,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (!this._canEdit()) return;
     const nextTool = ["markers", "areas", "views"].includes(tool) ? tool : "markers";
     if (this._mode === "edit" && this._sidebarTab === nextTool) return;
+    if (this._mode !== "edit") this._layoutAtOpen = this._yamlExport(this._deviceRows());
     this._clearEditorPendingState();
     if (this._sidebarTab !== nextTool) {
       this._areaDetailOpen = false;
@@ -311,8 +312,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (this._mode !== "edit") return;
     this._clearEditorPendingState();
     if (this._activeLayer === NO_LAYER) this._activeLayer = "";
+    const layout = this._yamlExport(this._deviceRows());
     this._mode = "user";
     this._render();
+    // Opened from the card editor: put the layout in the card config, so Save stores it.
+    if (this._isInEditorPreview() && layout !== this._layoutAtOpen) {
+      window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-layout-export", { detail: { yaml: layout } }));
+    }
     window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-layout-changed", {
       detail: { source: this, storageKey: this._storageKey() },
     }));
@@ -1614,6 +1620,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
                   ? `<div class="sidebar-tab-panel views-panel"><section class="view-tools">${this._modelViewToolsTemplate()}</section></div>`
                   : `<div class="sidebar-tab-panel markers-panel" data-markers-panel>${this._markersSidebarTemplate(rows)}</div>`
             }
+            ${this._isInEditorPreview() ? `<div class="sidebar-hint export-hint"><ha-icon icon="mdi:content-save-outline"></ha-icon>Changes are added to the card config when you close this editor. Press Save there to keep them.</div>` : `
             <details class="export" data-export ${this._exportOpen ? "open" : ""}>
               <summary>Export YAML</summary>
               <div class="export-actions">
@@ -1621,7 +1628,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
                 <span data-copy-yaml-status></span>
               </div>
               <textarea readonly data-yaml-export>${this._escape(this._yamlExport(rows))}</textarea>
-            </details>
+            </details>`}
           </aside>
           `
               : ""
@@ -9788,6 +9795,15 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           font-size: 12px;
         }
 
+        .export-hint {
+          display: flex;
+          align-items: flex-start;
+          gap: 6px;
+          border-top: 1px solid var(--dmp-border);
+          padding-top: 10px;
+          --mdc-icon-size: 16px;
+        }
+
         .list-group-title {
           margin-top: 4px;
           color: var(--dmp-muted);
@@ -13662,6 +13678,46 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
     }
   }
 
+  connectedCallback() {
+    this._boundLayoutExport = this._boundLayoutExport || ((event) => this._applyLayoutFromCard(event.detail?.yaml));
+    window.addEventListener("home-assistant-3d-floorplan-layout-export", this._boundLayoutExport);
+  }
+
+  disconnectedCallback() {
+    if (this._boundLayoutExport) window.removeEventListener("home-assistant-3d-floorplan-layout-export", this._boundLayoutExport);
+  }
+
+  // Only the layout sections change; other floor settings (animations, offsets, ...) stay as they are.
+  _applyLayoutFromCard(yaml) {
+    let parsed;
+    try {
+      parsed = this._expandDottedYamlKeys(this._parseFullYaml(String(yaml || "").trim()));
+    } catch (error) {
+      console.warn("home-assistant-3d-floorplan: layout could not be read", error);
+      return;
+    }
+    if (!parsed || typeof parsed !== "object") return;
+    const next = JSON.parse(JSON.stringify(this._config || {}));
+    const applyLayout = (target, source) => ["markers", "brightness_zones", "views", "default_view"].forEach((key) => {
+      const value = source?.[key];
+      const empty = value === undefined || value === null || value === ""
+        || (Array.isArray(value) ? !value.length : typeof value === "object" && !Object.keys(value).length);
+      if (empty) delete target[key];
+      else target[key] = value;
+    });
+    if (Array.isArray(next.floors) && next.floors.length) {
+      if (!Array.isArray(parsed.floors)) return;
+      next.floors.forEach((floor, index) => {
+        if (floor && typeof floor === "object") applyLayout(floor, parsed.floors[index]);
+      });
+    } else {
+      applyLayout(next, parsed);
+    }
+    if (JSON.stringify(next) === JSON.stringify(this._config || {})) return;
+    this._commitConfig(next);
+    this._render();
+  }
+
   _commitConfig(config) {
     this._config = config;
     this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
@@ -13821,7 +13877,10 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
     if (text === "null") return null;
     if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) return text.slice(1, -1);
     if (/^-?\d+(\.\d+)?$/.test(text)) return Number(text);
-    if (text.startsWith("[") && text.endsWith("]")) return text.slice(1, -1).split(",").map((item) => this._parseYamlScalar(item));
+    if (text.startsWith("[") && text.endsWith("]")) {
+      const inner = text.slice(1, -1).trim();
+      return inner ? inner.split(",").map((item) => this._parseYamlScalar(item)) : [];
+    }
     return text;
   }
 
