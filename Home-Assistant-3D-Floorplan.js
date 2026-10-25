@@ -102,7 +102,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._modelCameraState = null;
     this._modelDefaultViews = {};
     this._modelViews = {};
-    this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "" };
+    this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "", iconOnModel: true };
     this._activeRequestedModelView = "";
     this._activeModelView = "default";
     this._layers = [];
@@ -296,7 +296,6 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       views: [
         ...(this._modelDefaultViews?.[floorId] ? [{ id: "default", name: "Home", icon: "mdi:home-outline", color: "" }] : []),
         ...Object.keys(namedViews)
-          .sort((a, b) => a.localeCompare(b))
           .map((name) => ({ id: name, name, icon: namedViews[name]?.icon || "mdi:camera-outline", color: namedViews[name]?.icon_color || "" })),
       ],
       activeView: this._activeModelView,
@@ -1387,10 +1386,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _mergedModelViews(configViews, savedViews) {
     const result = {};
     for (const floor of this._floors) {
-      result[floor.id] = {
-        ...(configViews?.[floor.id] || {}),
-        ...this._normalizeModelViews(savedViews?.[floor.id]),
-      };
+      // Views keep their order (object key order); the browser copy holds the latest one.
+      const saved = this._normalizeModelViews(savedViews?.[floor.id]);
+      result[floor.id] = { ...saved, ...(configViews?.[floor.id] || {}), ...saved };
     }
     return result;
   }
@@ -1450,6 +1448,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ...(icon ? { icon } : {}),
       ...(icon && iconPosition ? { icon_position: iconPosition } : {}),
       ...(icon && iconColor ? { icon_color: iconColor } : {}),
+      ...(icon && (view.icon_on_model === false || view.iconOnModel === false) ? { icon_on_model: false } : {}),
     };
   }
 
@@ -2939,7 +2938,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _modelViewToolsTemplate() {
     const floorViews = this._modelViews?.[this._activeFloorId || "default"] || {};
-    const draft = this._modelViewDraft || { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "" };
+    const draft = this._modelViewDraft || { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "", iconOnModel: true };
     const value = (items, index) => items?.[index] ?? "";
     if (!this._viewDetailOpen) {
       const hasHome = Boolean(this._modelDefaultViews?.[this._activeFloorId || "default"]);
@@ -2961,16 +2960,18 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               <button type="button" class="row-icon-button" data-view-home="go" title="Go to Home" aria-label="Go to Home"><ha-icon icon="mdi:play"></ha-icon></button>` : ""}
             </span>
           </div>
-          ${Object.keys(floorViews).sort((a, b) => a.localeCompare(b)).map((name) => {
+          ${Object.keys(floorViews).map((name, index, names) => {
             const view = floorViews[name] || {};
             return `
             <div class="sidebar-row" data-view-select="${this._escape(name)}" role="button" tabindex="0">
               <span class="dot" ${view.icon_color ? `style="background: ${this._escape(view.icon_color)}"` : ""}><ha-icon icon="${this._escape(view.icon || "mdi:camera-outline")}"></ha-icon></span>
               <span class="device-text">
                 <strong>${this._escape(name)}</strong>
-                <small>${view.icon ? "Icon on model" : "No icon"}</small>
+                <small>${!view.icon ? "No icon" : view.icon_on_model === false ? "Icon in navigation only" : "Icon on model"}</small>
               </span>
               <span class="row-badges">
+                <button type="button" class="row-icon-button" data-view-move="${this._escape(name)}" data-view-move-by="-1" title="Move up" aria-label="Move ${this._escape(name)} up" ${index === 0 ? "disabled" : ""}><ha-icon icon="mdi:chevron-up"></ha-icon></button>
+                <button type="button" class="row-icon-button" data-view-move="${this._escape(name)}" data-view-move-by="1" title="Move down" aria-label="Move ${this._escape(name)} down" ${index === names.length - 1 ? "disabled" : ""}><ha-icon icon="mdi:chevron-down"></ha-icon></button>
                 <button type="button" class="row-icon-button" data-view-go="${this._escape(name)}" title="Go to view" aria-label="Go to ${this._escape(name)}"><ha-icon icon="mdi:play"></ha-icon></button>
               </span>
             </div>`;
@@ -3030,6 +3031,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         </label>
         <button type="button" data-view-icon-color-clear ${draft.iconColor ? "" : "disabled"}>Theme Color</button>
       </div>
+      <label class="sidebar-check">
+        <input type="checkbox" data-view-icon-on-model ${draft.iconOnModel !== false ? "checked" : ""} />
+        <span>Show icon on model</span>
+      </label>
+      ${draft.iconOnModel === false ? `<div class="sidebar-hint">The icon is only used in the navigation card and lists.</div>` : `
       <div class="view-coordinate-grid">
         <strong>Icon position</strong>
         ${[0, 1, 2].map((index) => `
@@ -3041,7 +3047,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       <div class="view-actions">
         <button type="button" data-view-icon-pick class="${this._pendingViewIconPick ? "active" : ""}">${this._pendingViewIconPick ? "Click model…" : "Pick on Model"}</button>
         <button type="button" data-view-icon-position-clear>Use Target</button>
-      </div>` : ""}
+      </div>`}` : ""}
       <button type="button" class="panel-button primary" data-view-save>Save view</button>
       ${existing ? `<button type="button" class="panel-button danger" data-view-remove="${this._escape(draft.originalName)}">Remove view</button>` : ""}
     `;
@@ -3069,7 +3075,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     root?.querySelectorAll("[data-view-new]").forEach((element) => {
       element.addEventListener("click", () => {
         const view = this._currentModelCameraView();
-        this._modelViewDraft = { name: "", originalName: "", position: view?.position || [], target: view?.target || [], zoom: view?.zoom || 1, icon: "", iconPosition: [], iconColor: "" };
+        this._modelViewDraft = { name: "", originalName: "", position: view?.position || [], target: view?.target || [], zoom: view?.zoom || 1, icon: "", iconPosition: [], iconColor: "", iconOnModel: true };
         this._pendingViewIconPick = false;
         this._viewDetailOpen = true;
         this._refreshModelViewTools();
@@ -3102,13 +3108,19 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         this._refreshModelViewTools();
       });
     });
+    root?.querySelectorAll("[data-view-move]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this._moveModelView(event.currentTarget.dataset.viewMove, Number(event.currentTarget.dataset.viewMoveBy));
+      });
+    });
     root?.querySelectorAll("[data-view-select]").forEach((element) => {
       element.addEventListener("click", (event) => {
-        if (event.target.closest?.("[data-view-go]")) return;
+        if (event.target.closest?.("[data-view-go], [data-view-move]")) return;
         const name = event.currentTarget.dataset.viewSelect;
         const view = this._modelViews?.[this._activeFloorId || "default"]?.[name];
         if (!view) return;
-        this._modelViewDraft = { name, originalName: name, position: [...view.position], target: [...view.target], zoom: view.zoom || 1, icon: view.icon || "", iconPosition: [...(view.icon_position || [])], iconColor: view.icon_color || "" };
+        this._modelViewDraft = { name, originalName: name, position: [...view.position], target: [...view.target], zoom: view.zoom || 1, icon: view.icon || "", iconPosition: [...(view.icon_position || [])], iconColor: view.icon_color || "", iconOnModel: view.icon_on_model !== false };
         this._pendingViewIconPick = false;
         this._viewDetailOpen = true;
         this._refreshModelViewTools();
@@ -3130,7 +3142,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         const name = event.currentTarget.dataset.viewRemove;
         delete this._modelViews[this._activeFloorId || "default"]?.[name];
         this._saveModelViews();
-        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "" };
+        this._modelViewDraft = { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "", iconOnModel: true };
         this._pendingViewIconPick = false;
         this._viewDetailOpen = false;
         this._refreshModelViewTools();
@@ -3152,6 +3164,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     root?.querySelectorAll("[data-view-icon-color]").forEach((element) => {
       element.addEventListener("change", (event) => {
         this._modelViewDraft = { ...this._modelViewDraft, iconColor: this._normalizeHexColor(event.currentTarget.value) };
+        this._refreshModelViewTools();
+      });
+    });
+    root?.querySelectorAll("[data-view-icon-on-model]").forEach((element) => {
+      element.addEventListener("change", (event) => {
+        this._modelViewDraft = { ...this._modelViewDraft, iconOnModel: event.currentTarget.checked };
+        if (!event.currentTarget.checked) this._pendingViewIconPick = false;
         this._refreshModelViewTools();
       });
     });
@@ -3204,6 +3223,20 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return next;
   }
 
+  _moveModelView(name, delta) {
+    const floorId = this._activeFloorId || "default";
+    const entries = Object.entries(this._modelViews?.[floorId] || {});
+    const from = entries.findIndex(([key]) => key === name);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= entries.length) return;
+    const [moved] = entries.splice(from, 1);
+    entries.splice(to, 0, moved);
+    this._modelViews[floorId] = Object.fromEntries(entries);
+    this._saveModelViews();
+    this._refreshModelViewTools();
+    this.shadowRoot?.querySelector(`[data-view-move="${this._cssEscape(name)}"][data-view-move-by="${delta}"]:not([disabled])`)?.focus();
+  }
+
   _saveNamedModelView(root) {
     const name = String(this._modelViewDraft?.name || root.querySelector("[data-view-name]")?.value || "").trim();
     const position = this._numberArray(this._modelViewDraft?.position, 3);
@@ -3216,16 +3249,25 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const iconPosition = icon ? this._numberArray(this._modelViewDraft?.iconPosition, 3) : null;
     const iconColor = icon ? this._normalizeHexColor(this._modelViewDraft?.iconColor) : "";
     const originalName = this._modelViewDraft?.originalName;
-    if (originalName && originalName !== name) delete this._modelViews[floorId][originalName];
-    this._modelViews[floorId][name] = {
+    const view = {
       position,
       target,
       zoom,
       ...(icon ? { icon } : {}),
       ...(iconPosition ? { icon_position: iconPosition } : {}),
       ...(iconColor ? { icon_color: iconColor } : {}),
+      ...(icon && this._modelViewDraft?.iconOnModel === false ? { icon_on_model: false } : {}),
     };
-    this._modelViewDraft = { name, originalName: name, position, target, zoom, icon, iconPosition: iconPosition || [], iconColor };
+    if (originalName && originalName !== name && this._modelViews[floorId][originalName]) {
+      this._modelViews[floorId] = Object.fromEntries(
+        Object.entries(this._modelViews[floorId])
+          .filter(([key]) => key !== name)
+          .map(([key, value]) => (key === originalName ? [name, view] : [key, value]))
+      );
+    } else {
+      this._modelViews[floorId][name] = view;
+    }
+    this._modelViewDraft = { name, originalName: name, position, target, zoom, icon, iconPosition: iconPosition || [], iconColor, iconOnModel: this._modelViewDraft?.iconOnModel !== false };
     this._pendingViewIconPick = false;
     this._viewDetailOpen = false;
     this._saveModelViews();
@@ -5572,7 +5614,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _markerViewsEditor(row) {
-    const viewNames = Object.keys(this._modelViews?.[this._activeFloorId || "default"] || {}).sort((a, b) => a.localeCompare(b));
+    const viewNames = Object.keys(this._modelViews?.[this._activeFloorId || "default"] || {});
     if (!viewNames.length) return "";
     const selected = this._markers[row.key]?.visibleInViews || [];
     const options = ["default", ...viewNames.filter((name) => name !== "default")]
@@ -5942,6 +5984,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         ...(view.icon ? [`${indent}    icon: ${view.icon}`] : []),
         ...(view.icon_position ? [`${indent}    icon_position: ${formatArray(view.icon_position)}`] : []),
         ...(view.icon_color ? [`${indent}    icon_color: "${view.icon_color}"`] : []),
+        ...(view.icon_on_model === false ? [`${indent}    icon_on_model: false`] : []),
       ]),
     ];
   }
@@ -6833,7 +6876,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const isEditing = this._mode === "edit";
     const floorViews = this._normalizeModelViews(this._modelViews?.[this._activeFloorId || "default"]);
     return Object.entries(floorViews).flatMap(([name, view]) => {
-      if (!view.icon) return [];
+      if (!view.icon || view.icon_on_model === false) return [];
       const leaving = !isEditing && name === this._leavingViewIcon;
       if (!isEditing && name === this._activeModelView && !leaving) return [];
       const button = document.createElement("button");
@@ -9887,7 +9930,12 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           --mdc-icon-size: 18px;
         }
 
-        .sidebar-tab-panel .row-icon-button:hover {
+        .sidebar-tab-panel .row-icon-button:disabled {
+          cursor: default;
+          opacity: 0.3;
+        }
+
+        .sidebar-tab-panel .row-icon-button:not(:disabled):hover {
           background: var(--secondary-background-color, #f7f8fa);
           color: var(--primary-color, #03a9f4);
         }

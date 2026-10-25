@@ -299,10 +299,12 @@ views:
     icon: mdi:silverware-fork-knife
     icon_position: [1.2000, 1.0000, -0.5000]   # optional, defaults to target
     icon_color: "#ff9800"                       # optional, defaults to the theme primary color
+    icon_on_model: false                        # optional: only use the icon in the navigation card and lists
 ```
 
 In the editor's **Views** mode, open a view and choose a **View icon** and optionally
-an **Icon color** (**Theme Color** resets it). Then use **Pick on Model** to click
+an **Icon color** (**Theme Color** resets it). Turn off **Show icon on model** to use
+the icon only in the navigation card and lists. Otherwise use **Pick on Model** to click
 where the icon should appear, or **Use Target** to place it at the view target.
 Press **Save view** to keep the icon.
 
@@ -353,7 +355,11 @@ mode. Click an area to edit it, and use ← to go back to the list.
 **Views** - a list with the Home (startup) view and your named views. **New view**
 starts from the current camera. Click a view to edit its name, camera and icon,
 and use **Preview** to fly to the edited camera. Renaming a view replaces the old
-one. The play button on a row goes to that view.
+one in the same place. The play button on a row goes to that view, and the arrow
+buttons move it up or down. That order is used everywhere: the navigation card, the
+marker panel and the `views:` section of the YAML (views are listed in that order).
+A view whose name is a whole number, such as `1`, always sorts first, so give views
+a word as name.
 
 **Marker panel** - selecting a placed marker opens a panel on the right. Its
 settings are grouped in collapsible sections, each showing a short summary when
