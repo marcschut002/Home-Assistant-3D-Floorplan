@@ -900,6 +900,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         markerDisplay: this._normalizeMarkerDisplay(marker.marker_display || marker.markerDisplay),
         visibleInViews: this._normalizeViewNames(marker.visible_in_views || marker.visibleInViews),
         layers: this._normalizeViewNames(marker.layers),
+        excludedLayers: this._normalizeViewNames(marker.exclude_layers || marker.excludedLayers),
         tapAction: this._normalizeMarkerAction(marker.tap_action || marker.tapAction, "tap"),
         holdAction: this._normalizeMarkerAction(marker.hold_action || marker.holdAction, "hold"),
         navigationPath: this._normalizeNavigationPath(marker.navigation_path || marker.navigationPath),
@@ -941,6 +942,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         markerDisplay: this._normalizeMarkerDisplay(marker.markerDisplay || marker.marker_display),
         visibleInViews: this._normalizeViewNames(marker.visibleInViews || marker.visible_in_views),
         layers: this._normalizeViewNames(marker.layers),
+        excludedLayers: this._normalizeViewNames(marker.exclude_layers || marker.excludedLayers),
         tapAction: this._normalizeMarkerAction(marker.tapAction || marker.tap_action, "tap"),
         holdAction: this._normalizeMarkerAction(marker.holdAction || marker.hold_action, "hold"),
         navigationPath: this._normalizeNavigationPath(marker.navigationPath || marker.navigation_path),
@@ -3887,7 +3889,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return JSON.stringify([
       this._activeFloorId,
       this._activeLayer,
-      Object.entries(this._markers).map(([key, marker]) => [key, marker.layers || [], marker.markerDisplay || "", marker.visibleInViews || []]),
+      Object.entries(this._markers).map(([key, marker]) => [key, marker.layers || [], marker.excludedLayers || [], marker.markerDisplay || "", marker.visibleInViews || []]),
     ]);
   }
 
@@ -4631,7 +4633,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _isMarkerInLayer(row, layerId) {
     const layer = this._layerById(layerId);
     if (!layer) return false;
-    return this._layerMatchesRow(layer, row) || (this._markers[row?.key]?.layers || []).some((id) => this._layerSlug(id) === layer.id);
+    const marker = this._markers[row?.key] || {};
+    if ((marker.excludedLayers || []).some((id) => this._layerSlug(id) === layer.id)) return false;
+    return this._layerMatchesRow(layer, row) || (marker.layers || []).some((id) => this._layerSlug(id) === layer.id);
   }
 
   // A selected layer decides on its own which markers show; "All" falls back to
@@ -5635,14 +5639,17 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _markerLayersEditor(row) {
     if (!this._layers.length) return "";
-    const selected = this._markers[row.key]?.layers || [];
     const options = this._layers
       .map((layer) => {
         const automatic = this._layerMatchesRow(layer, row);
+        const member = this._isMarkerInLayer(row, layer.id);
+        const title = automatic
+          ? member ? "Added by the layer's domains, device classes or entities. Click to leave this marker out." : "Left out of this layer. Click to add it back."
+          : "";
         return `
-        <label title="${automatic ? "Matched by the layer's domains, device classes or entities" : ""}">
-          <input type="checkbox" data-marker-layer="${this._escape(row.key)}" value="${this._escape(layer.id)}" ${automatic || selected.includes(layer.id) ? "checked" : ""} ${automatic ? "disabled" : ""} />
-          <span>${this._escape(layer.name)}${automatic ? " <small>(auto)</small>" : ""}</span>
+        <label title="${this._escape(title)}">
+          <input type="checkbox" data-marker-layer="${this._escape(row.key)}" value="${this._escape(layer.id)}" ${member ? "checked" : ""} />
+          <span>${this._escape(layer.name)}${automatic ? ` <small>${member ? "(auto)" : "(left out)"}</small>` : ""}</span>
         </label>
       `;
       })
@@ -5791,6 +5798,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
                     ...(marker.markerDisplay ? [`        marker_display: ${marker.markerDisplay}`] : []),
                     ...(marker.visibleInViews.length ? [`        visible_in_views: ${JSON.stringify(marker.visibleInViews)}`] : []),
                     ...(marker.layers.length ? [`        layers: ${JSON.stringify(marker.layers)}`] : []),
+                    ...(marker.excludedLayers.length ? [`        exclude_layers: ${JSON.stringify(marker.excludedLayers)}`] : []),
                     `        tap_action: ${marker.tapAction}`,
                     `        hold_action: ${marker.holdAction}`,
                     ...(marker.navigationPath ? [`        navigation_path: ${JSON.stringify(marker.navigationPath)}`] : []),
@@ -5865,6 +5873,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               ...(marker.markerDisplay ? [`    marker_display: ${marker.markerDisplay}`] : []),
               ...(marker.visibleInViews.length ? [`    visible_in_views: ${JSON.stringify(marker.visibleInViews)}`] : []),
               ...(marker.layers.length ? [`    layers: ${JSON.stringify(marker.layers)}`] : []),
+              ...(marker.excludedLayers.length ? [`    exclude_layers: ${JSON.stringify(marker.excludedLayers)}`] : []),
               `    tap_action: ${marker.tapAction}`,
               `    hold_action: ${marker.holdAction}`,
               ...(marker.navigationPath ? [`    navigation_path: ${JSON.stringify(marker.navigationPath)}`] : []),
@@ -6004,6 +6013,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           markerDisplay: this._normalizeMarkerDisplay(marker.markerDisplay || marker.marker_display),
           visibleInViews: this._normalizeViewNames(marker.visibleInViews || marker.visible_in_views),
           layers: this._normalizeViewNames(marker.layers),
+          excludedLayers: this._normalizeViewNames(marker.excludedLayers || marker.exclude_layers),
           tapAction: this._exportMarkerAction(row, marker, "tap"),
           holdAction: this._exportMarkerAction(row, marker, "hold"),
           navigationPath: this._normalizeNavigationPath(marker.navigationPath || marker.navigation_path),
@@ -8882,11 +8892,16 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _updateMarkerLayer(key, layerId, member) {
     if (!this._markers[key]) return;
-    const current = this._normalizeViewNames(this._markers[key].layers);
-    const next = member ? [...new Set([...current, layerId])] : current.filter((id) => id !== layerId);
+    const row = this._deviceRows().find((item) => item.key === key);
+    // A layer that picks the marker by its rules is switched off with an exclusion instead.
+    const automatic = this._layerMatchesRow(this._layerById(layerId), row);
+    const property = automatic ? "excludedLayers" : "layers";
+    const include = automatic ? !member : member;
+    const current = this._normalizeViewNames(this._markers[key][property]);
+    const next = include ? [...new Set([...current, layerId])] : current.filter((id) => id !== layerId);
     if (next.length === current.length && next.every((id) => current.includes(id))) return;
     this._pushMarkerHistory();
-    this._markers[key].layers = next;
+    this._markers[key][property] = next;
     this._saveMarkers();
     this._refresh3DMarkerOverlay();
     this._refreshDeviceRow(key);
@@ -9232,6 +9247,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       markerDisplay: existingMarker?.markerDisplay || "",
       visibleInViews: existingMarker?.visibleInViews || [],
       layers: existingMarker?.layers || this._layersForNewMarker(row),
+      excludedLayers: existingMarker?.excludedLayers || [],
       tapAction: existingMarker?.tapAction || "",
       holdAction: existingMarker?.holdAction || "",
       navigationPath: existingMarker?.navigationPath || "",

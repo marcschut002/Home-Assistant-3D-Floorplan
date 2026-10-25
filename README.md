@@ -225,8 +225,19 @@ markers:
     layers: [climate]
 ```
 
+To keep a marker out of a layer it matches automatically, for example one lamp you
+never want to see, exclude it:
+
+```yaml
+markers:
+  - entity: light.wc
+    marker_display: hide
+    exclude_layers: [lighting]
+```
+
 In Edit Mode, the marker panel lists all layers under **Layers**. Layers that the
-marker matches automatically are shown as checked and marked *(auto)*.
+marker matches automatically are marked *(auto)*; click such a chip to leave the
+marker out of that layer (it then reads *(left out)*), and click again to add it back.
 
 While a layer is selected, only its markers are shown. The marker's own `hide`
 setting and `visible_in_views` are ignored, so a lighting layer can show lights
