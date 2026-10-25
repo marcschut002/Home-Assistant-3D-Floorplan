@@ -182,7 +182,10 @@ show: [floors, layers, views]
 ```
 
 A card with nothing to show, such as a views card on a floor without views, hides
-itself; while editing the dashboard it shows why instead. Set
+itself; while editing the dashboard it shows why instead. The same goes for a
+navigation card that has not found its floorplan card yet: it keeps looking every
+second, and again when the page wakes up, so the order in which the cards load does
+not matter. Set
 `show_layer_switcher: false` on the floorplan card to drop its built-in layer buttons
 when a navigation card shows the layers.
 

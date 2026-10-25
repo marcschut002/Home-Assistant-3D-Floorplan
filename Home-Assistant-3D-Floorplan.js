@@ -416,6 +416,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     window.addEventListener("home-assistant-3d-floorplan-nav-action", this._boundNavAction);
     document.addEventListener("visibilitychange", this._boundVisibilityChange);
     this._queueModelViewerRecovery();
+    // setConfig runs before the card is attached, so its first broadcast was skipped.
+    window.setTimeout(() => this._broadcastNavState(), 0);
   }
 
   disconnectedCallback() {
@@ -13964,6 +13966,9 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
     this._state = null;
     this._stateSignature = "";
     this._boundState = (event) => this._handleState(event);
+    this._boundVisibility = () => {
+      if (!document.hidden) this._requestState();
+    };
   }
 
   setConfig(config) {
@@ -13998,11 +14003,20 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
 
   connectedCallback() {
     window.addEventListener("home-assistant-3d-floorplan-state", this._boundState);
+    document.addEventListener("visibilitychange", this._boundVisibility);
     this._requestState();
+    // The floorplan card may attach after this one (page load, waking up): keep asking until it answers.
+    window.clearInterval(this._retryTimer);
+    this._retryTimer = window.setInterval(() => {
+      if (this._state) window.clearInterval(this._retryTimer);
+      else this._requestState();
+    }, 1000);
   }
 
   disconnectedCallback() {
     window.removeEventListener("home-assistant-3d-floorplan-state", this._boundState);
+    document.removeEventListener("visibilitychange", this._boundVisibility);
+    window.clearInterval(this._retryTimer);
   }
 
   getCardSize() {
@@ -14073,8 +14087,8 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
     if (!this.shadowRoot || !this._config) return;
     const { style, layout, align, labels, titles } = this._config;
     const groups = this._state ? this._groups() : [];
-    // Nothing to choose (e.g. a floor without views): hide the card outside of editing.
-    this.style.display = this._state && !groups.length && !this._preview ? "none" : "";
+    // Nothing to choose, or no floorplan card answered yet: hide the card outside of editing.
+    this.style.display = !groups.length && !this._preview ? "none" : "";
     const body = !this._state
       ? `<div class="empty">No 3D floorplan card found on this dashboard${this._config.target ? ` with target "${this._escape(this._config.target)}"` : ""}.</div>`
       : !groups.length
