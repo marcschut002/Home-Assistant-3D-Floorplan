@@ -1,4 +1,25 @@
 ﻿const VERSION = "2.11.0";
+// Texts on the dashboard (navigation card, layer switcher), by Home Assistant language.
+const UI_TEXTS = {
+  en: {
+    floors: "Floor", layers: "Layer", views: "View", all: "All", home: "Home", choose: "Choose…",
+    floorsPlural: "floors", layersPlural: "layers", viewsPlural: "views",
+    notFound: "No 3D floorplan card found on this dashboard", withTarget: "with target",
+    nothing: (groups) => `Nothing to show: the floorplan has no ${groups} to choose from.`,
+  },
+  nl: {
+    floors: "Verdieping", layers: "Laag", views: "Weergave", all: "Alles", home: "Thuis", choose: "Kies…",
+    floorsPlural: "verdiepingen", layersPlural: "lagen", viewsPlural: "weergaven",
+    notFound: "Geen 3D floorplan card gevonden op dit dashboard", withTarget: "met target",
+    nothing: (groups) => `Niets te tonen: de floorplan heeft geen ${groups} om uit te kiezen.`,
+  },
+};
+
+function uiTexts(hass) {
+  const language = String(hass?.locale?.language || hass?.language || "en").toLowerCase().split("-")[0];
+  return UI_TEXTS[language] || UI_TEXTS.en;
+}
+
 // Edit-only layer filter: markers that belong to no layer.
 const NO_LAYER = "__none__";
 // Domains left out of the "Add" list unless "Show all entity types" is on.
@@ -4661,7 +4682,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _layerSwitcherTemplate() {
     if (!this._layers.length || this._config.show_layer_switcher === false) return "";
-    const buttons = [{ id: "", name: "All", icon: "mdi:layers-outline" }, ...this._layers];
+    const buttons = [{ id: "", name: uiTexts(this._hass).all, icon: "mdi:layers-outline" }, ...this._layers];
     return `
       <div class="layer-switcher" role="toolbar" aria-label="Marker layers">
         ${buttons.map((layer) => `
@@ -12825,16 +12846,6 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       </style>
       <div class="floorplan-editor">
         <section>
-          <h3>Edit Layout</h3>
-          <div class="editor-help">Opens the floorplan in full screen to place markers, draw areas or set up camera views. Close it with ✕ or Esc to return here.</div>
-          <div class="layout-edit-actions">
-            <ha-button data-open-layout-editor="markers">Markers</ha-button>
-            <ha-button data-open-layout-editor="areas">Areas</ha-button>
-            <ha-button data-open-layout-editor="views">Views</ha-button>
-          </div>
-        </section>
-
-        <section>
           <h3>Basic</h3>
           <div class="editor-grid">
             ${this._textInput("title", "Title", "3D Floorplan")}
@@ -12844,15 +12855,6 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
             ${this._textInput("model_height", "Model Height", "clamp(520px, 82vh, 1100px)")}
           </div>
           <div class="editor-help">Model Height accepts any CSS height (e.g. 700px, 80vh). In a sections view the grid height from the Layout tab is used instead.</div>
-        </section>
-
-        <section>
-          <h3>Performance</h3>
-          <div class="editor-grid">
-            ${this._selectInput("model_performance_profile", "Render Profile", [["quality", "Quality"], ["balanced", "Balanced"], ["performance", "Performance"], ["mobile", "Mobile"]], "quality")}
-            ${this._numberInput("model_pixel_ratio", "Pixel Ratio Override", 0, 0, 3, 0.25)}
-          </div>
-          <div class="editor-help">Quality keeps the sharp original render path. Use Balanced, Performance, or Mobile only for heavier models.</div>
         </section>
 
         <section>
@@ -12875,6 +12877,16 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <div class="editor-grid">
             ${this._selectInput("default_layer", "Default Layer", [["", "All"], ...this._config.layers.map((layer, index) => [String(layer.id || layer.name || `layer_${index + 1}`), String(layer.name || layer.id || `Layer ${index + 1}`)])], "")}
           </div>` : ""}
+        </section>
+
+        <section>
+          <h3>Edit Layout</h3>
+          <div class="editor-help">Opens the floorplan in full screen to place markers, draw areas or set up camera views. Close it with ✕ or Esc to return here.</div>
+          <div class="layout-edit-actions">
+            <ha-button data-open-layout-editor="markers">Markers</ha-button>
+            <ha-button data-open-layout-editor="areas">Areas</ha-button>
+            <ha-button data-open-layout-editor="views">Views</ha-button>
+          </div>
         </section>
 
         <section>
@@ -12901,15 +12913,6 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         </section>
 
         <section>
-          <h3>Offline Devices</h3>
-          <div class="editor-grid">
-            ${this._listInput("offline_states", "Offline States", ["unavailable", "unknown"])}
-            ${this._numberInput("offline_focus_distance", "Offline Focus Distance", 2, 1, 10, 0.1)}
-          </div>
-          <div class="editor-help">Focus distance uses model-relative levels from 1-10. Lower values zoom closer to the offline marker.</div>
-        </section>
-
-        <section>
           <h3>Entity Filters</h3>
           <div class="editor-grid">
             ${this._listInput("domains", "Domains", [])}
@@ -12917,6 +12920,15 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
             ${this._listInput("areas", "Areas", [])}
           </div>
           <div class="editor-help">Comma-separated values. Leave empty to include all.</div>
+        </section>
+
+        <section>
+          <h3>Offline Devices</h3>
+          <div class="editor-grid">
+            ${this._listInput("offline_states", "Offline States", ["unavailable", "unknown"])}
+            ${this._numberInput("offline_focus_distance", "Offline Focus Distance", 2, 1, 10, 0.1)}
+          </div>
+          <div class="editor-help">Focus distance uses model-relative levels from 1-10. Lower values zoom closer to the offline marker.</div>
         </section>
 
         <section>
@@ -12943,6 +12955,15 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <div class="object-config-list">
             ${this._renderInteractiveObjectEditors()}
           </div>
+        </section>
+
+        <section>
+          <h3>Performance</h3>
+          <div class="editor-grid">
+            ${this._selectInput("model_performance_profile", "Render Profile", [["quality", "Quality"], ["balanced", "Balanced"], ["performance", "Performance"], ["mobile", "Mobile"]], "quality")}
+            ${this._numberInput("model_pixel_ratio", "Pixel Ratio Override", 0, 0, 3, 0.25)}
+          </div>
+          <div class="editor-help">Quality keeps the sharp original render path. Use Balanced, Performance, or Mobile only for heavier models.</div>
         </section>
 
         <section>
@@ -14045,8 +14066,10 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
       style: config?.style === "dropdown" ? "dropdown" : "buttons",
       layout: config?.layout === "horizontal" ? "horizontal" : "vertical",
       align: ["center", "end"].includes(config?.align) ? config.align : "start",
-      labels: config?.labels !== false,
-      titles: config?.titles !== false,
+      // Older configs used `labels`/`titles` as switches and `texts` for the wording.
+      show_names: (config?.show_names ?? (typeof config?.labels === "boolean" ? config.labels : true)) !== false,
+      show_titles: (config?.show_titles ?? config?.titles) !== false,
+      labels: config?.labels && typeof config.labels === "object" ? config.labels : config?.texts && typeof config.texts === "object" ? config.texts : {},
       target: String(config?.target || "").trim(),
       show: show.length ? show : groups,
     };
@@ -14056,7 +14079,16 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
   }
 
   set hass(hass) {
+    const language = hass?.locale?.language || hass?.language;
+    const changed = language !== (this._hass?.locale?.language || this._hass?.language);
     this._hass = hass;
+    if (changed) this._render();
+  }
+
+  // A `labels:` entry in the config wins over the Home Assistant language.
+  _text(key) {
+    const custom = this._config?.labels?.[key];
+    return typeof custom === "string" && custom.trim() ? custom.trim() : uiTexts(this._hass)[key];
   }
 
   // Set by Home Assistant while the dashboard or this card is being edited.
@@ -14118,13 +14150,13 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
     const state = this._state;
     const groups = {
       floors: state.floors.length > 1
-        ? { kind: "floor", title: "Floor", items: state.floors.map((floor) => ({ value: floor.id, name: floor.name, icon: "mdi:stairs", active: floor.id === state.activeFloor })) }
+        ? { kind: "floor", title: this._text("floors"), items: state.floors.map((floor) => ({ value: floor.id, name: floor.name, icon: "mdi:stairs", active: floor.id === state.activeFloor })) }
         : null,
       layers: state.layers.length
-        ? { kind: "layer", title: "Layer", items: [{ id: "", name: "All", icon: "mdi:layers-outline" }, ...state.layers].map((layer) => ({ value: layer.id, name: layer.name, icon: layer.icon, active: layer.id === state.activeLayer })) }
+        ? { kind: "layer", title: this._text("layers"), items: [{ id: "", name: this._text("all"), icon: "mdi:layers-outline" }, ...state.layers].map((layer) => ({ value: layer.id, name: layer.name, icon: layer.icon, active: layer.id === state.activeLayer })) }
         : null,
       views: state.views.length
-        ? { kind: "view", title: "View", items: state.views.map((view) => ({ value: view.id, name: view.name, icon: view.icon, color: view.color, active: view.id === state.activeView })) }
+        ? { kind: "view", title: this._text("views"), items: state.views.map((view) => ({ value: view.id, name: view.id === "default" ? this._text("home") : view.name, icon: view.icon, color: view.color, active: view.id === state.activeView })) }
         : null,
     };
     return this._config.show.map((key) => groups[key]).filter(Boolean);
@@ -14138,7 +14170,7 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
           <span class="select-label">${this._escape(group.title)}</span>
           <ha-icon class="select-icon" icon="${this._escape(active?.icon || "mdi:help-circle-outline")}"></ha-icon>
           <select data-kind="${group.kind}">
-            ${active ? "" : `<option value="" selected disabled>Choose…</option>`}
+            ${active ? "" : `<option value="" selected disabled>${this._escape(this._text("choose"))}</option>`}
             ${group.items.map((item) => `<option value="${this._escape(item.value)}" ${item.active ? "selected" : ""}>${this._escape(item.name)}</option>`).join("")}
           </select>
           <svg class="select-chevron" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>
@@ -14149,31 +14181,31 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
 
   _render() {
     if (!this.shadowRoot || !this._config) return;
-    const { style, layout, align, labels, titles } = this._config;
+    const { style, layout, align, show_names: showNames, show_titles: showTitles } = this._config;
     const groups = this._state ? this._groups() : [];
     // Nothing to choose, or no floorplan card answered yet: hide the card outside of editing.
     this.style.display = !groups.length && !this._preview ? "none" : "";
     const body = !this._state
-      ? `<div class="empty">No 3D floorplan card found on this dashboard${this._config.target ? ` with target "${this._escape(this._config.target)}"` : ""}.</div>`
+      ? `<div class="empty">${this._escape(this._text("notFound"))}${this._config.target ? ` ${this._escape(this._text("withTarget"))} "${this._escape(this._config.target)}"` : ""}.</div>`
       : !groups.length
-        ? `<div class="empty">Nothing to show: the floorplan has no ${this._config.show.join(", ")} to choose from.</div>`
+        ? `<div class="empty">${this._escape(uiTexts(this._hass).nothing(this._config.show.map((group) => this._text(`${group}Plural`)).join(", ")))}</div>`
         : style === "dropdown"
           ? this._dropdownTemplate(groups)
           : groups.map((group) => `
           <section class="group" role="group" aria-label="${this._escape(group.title)}">
-            ${titles && layout === "vertical" ? `<div class="group-title">${this._escape(group.title)}</div>` : ""}
+            ${showTitles && layout === "vertical" ? `<div class="group-title">${this._escape(group.title)}</div>` : ""}
             <div class="items">
               ${group.items.map((item) => `
-                <button type="button" class="item ${item.active ? "active" : ""}" data-kind="${group.kind}" data-value="${this._escape(item.value)}" aria-pressed="${item.active ? "true" : "false"}" title="${this._escape(item.name)}" ${labels ? "" : `aria-label="${this._escape(item.name)}"`}>
+                <button type="button" class="item ${item.active ? "active" : ""}" data-kind="${group.kind}" data-value="${this._escape(item.value)}" aria-pressed="${item.active ? "true" : "false"}" title="${this._escape(item.name)}" ${showNames ? "" : `aria-label="${this._escape(item.name)}"`}>
                   <ha-icon icon="${this._escape(item.icon)}" ${item.color && !item.active ? `style="color: ${this._escape(item.color)}"` : ""}></ha-icon>
-                  ${labels ? `<span>${this._escape(item.name)}</span>` : ""}
+                  ${showNames ? `<span>${this._escape(item.name)}</span>` : ""}
                 </button>
               `).join("")}
             </div>
           </section>
         `).join(`<div class="divider" aria-hidden="true"></div>`);
     this.shadowRoot.innerHTML = `
-      <ha-card class="${style === "dropdown" ? `dropdowns ${layout}-dropdowns` : layout} align-${align} ${labels ? "" : "icons-only"}">${body}</ha-card>
+      <ha-card class="${style === "dropdown" ? `dropdowns ${layout}-dropdowns` : layout} align-${align} ${showNames ? "" : "icons-only"}">${body}</ha-card>
       <style>
         :host { display: block; }
         ha-card { box-sizing: border-box; height: 100%; padding: 12px; }
@@ -14324,12 +14356,19 @@ class HomeAssistant3DFloorplanNavEditor extends HTMLElement {
         style: "Style",
         layout: "Layout",
         align: "Alignment (horizontal)",
-        labels: "Show names next to icons",
-        titles: "Show group titles (vertical)",
+        show_names: "Show names next to icons",
+        show_titles: "Show group titles (vertical)",
         target: "Target card (storage_key or title, only with several floorplan cards)",
+        labels: "Labels (empty = Home Assistant language)",
+        floors: "Floors title",
+        layers: "Layers title",
+        views: "Views title",
+        all: "All layers button",
+        home: "Home view button",
       })[schema.name] || schema.name;
       this._form.addEventListener("value-changed", (event) => {
-        this._config = { ...this._config, ...event.detail.value };
+        const { texts, titles, ...current } = this._config;
+        this._config = { ...current, ...event.detail.value };
         this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: this._config }, bubbles: true, composed: true }));
       });
       this.appendChild(this._form);
@@ -14347,19 +14386,27 @@ class HomeAssistant3DFloorplanNavEditor extends HTMLElement {
       { name: "style", selector: { select: { mode: "dropdown", options: [{ value: "buttons", label: "Buttons" }, { value: "dropdown", label: "Dropdowns (compact, good on mobile)" }] } } },
       { name: "layout", selector: { select: { mode: "dropdown", options: [{ value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Horizontal" }] } } },
       { name: "align", selector: { select: { mode: "dropdown", options: [{ value: "start", label: "Start" }, { value: "center", label: "Center" }, { value: "end", label: "End" }] } } },
-      { name: "labels", selector: { boolean: {} } },
-      { name: "titles", selector: { boolean: {} } },
+      { name: "show_names", selector: { boolean: {} } },
+      { name: "show_titles", selector: { boolean: {} } },
       { name: "target", selector: { text: {} } },
+      {
+        name: "labels",
+        type: "expandable",
+        schema: ["floors", "layers", "views", "all", "home"].map((name) => ({ name, selector: { text: {} } })),
+      },
     ];
     this._form.data = {
       show: ["floors", "layers", "views"],
       style: "buttons",
       layout: "vertical",
       align: "start",
-      labels: true,
-      titles: true,
+      show_names: true,
+      show_titles: true,
       target: "",
       ...this._config,
+      ...(typeof this._config.labels === "boolean" ? { show_names: this._config.labels, labels: this._config.texts || {} } : {}),
+      ...(this._config.titles !== undefined && this._config.show_titles === undefined ? { show_titles: this._config.titles } : {}),
+      ...(this._config.texts && !(this._config.labels && typeof this._config.labels === "object") ? { labels: this._config.texts } : {}),
     };
   }
 }

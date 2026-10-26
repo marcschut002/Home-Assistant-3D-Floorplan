@@ -166,9 +166,22 @@ align: center
 | `style` | `buttons` | `buttons`, or `dropdown` for one compact select per group. Dropdowns use the phone's own picker, which suits mobile. |
 | `layout` | `vertical` | `vertical` stacks the groups; `horizontal` puts them in one row (round buttons, or dropdowns side by side that wrap on narrow screens). |
 | `align` | `start` | `start`, `center` or `end`; horizontal layout only. |
-| `labels` | `true` | `false` shows icons only. |
-| `titles` | `true` | Group titles in the vertical layout. |
+| `show_names` | `true` | `false` shows icons only. |
+| `show_titles` | `true` | Group titles in the vertical layout. |
 | `target` | | The floorplan card's `storage_key`, or else its `title`. Only needed with several floorplan cards on one dashboard; without it the first one found is used. |
+| `labels` | | Your own labels: `floors`, `layers`, `views` (group titles), `all` (the all-layers button) and `home` (the Home view). Anything left out follows the Home Assistant language. |
+
+The navigation card and the floorplan's layer switcher follow the language of your
+Home Assistant profile: Dutch (Verdieping, Laag, Weergave, Alles, Thuis) or English
+for any other language. To pick your own words (older configs with `texts:`,
+`labels: false` and `titles:` keep working):
+
+```yaml
+type: custom:home-assistant-3d-floorplan-nav
+labels:
+  floors: Etage
+  views: Ruimtes
+```
 
 For a different navigation on phones, add two navigation cards and give each a
 **Screen** visibility condition in the card's Visibility tab: the dropdown card for
