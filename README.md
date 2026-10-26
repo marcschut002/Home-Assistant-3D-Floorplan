@@ -270,7 +270,8 @@ tap_action:
 Set `show_layer_switcher: false` to hide the built-in switcher and use your own
 buttons instead. A link without `hafp_layer` keeps the current layer.
 
-Layers can also be managed in the visual card editor under **Layers**.
+Layers can also be managed in the visual card editor under **Layers**, where the
+arrow buttons set their order in the navigation card and the layer switcher.
 
 ## Named Camera Views
 
@@ -572,15 +573,22 @@ view_mode: "3d"
 floors:
   - id: ground
     name: Ground Floor
+    icon: mdi:home-floor-0
     model: /local/floorplans/ground-floor.glb
     markers: []
     brightness_zones: []
   - id: first
     name: First Floor
+    icon: mdi:home-floor-1
     model: /local/floorplans/first-floor.glb
     markers: []
     brightness_zones: []
 ```
+
+`icon` is optional and shows on the floor buttons of the navigation card (without
+it, a stairs icon). In the card editor, open a floor under **Floors** and fill in
+**Icon**. The arrow buttons next to each floor change the order; its markers, areas
+and views move with it.
 
 ## Offline / Three.js Setup
 

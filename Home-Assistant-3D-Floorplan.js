@@ -310,7 +310,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const namedViews = this._modelViews?.[floorId] || {};
     return {
       id: this._navCardId(),
-      floors: this._floors.map((floor) => ({ id: floor.id, name: floor.name })),
+      floors: this._floors.map((floor) => ({ id: floor.id, name: floor.name, icon: floor.icon || "mdi:stairs" })),
       activeFloor: this._activeFloorId,
       layers: this._layers.map((layer) => ({ id: layer.id, name: layer.name, icon: layer.icon })),
       activeLayer: this._activeLayer === NO_LAYER ? "" : this._activeLayer,
@@ -858,6 +858,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       return {
         id,
         name: floor.name || floor.title || rawId || `Floor ${index + 1}`,
+        icon: String(floor.icon || "").trim(),
         image: floor.image || "",
         model: floor.model || config.model || "",
         default_view: floor.default_view || floor.defaultView || null,
@@ -5803,6 +5804,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           return [
             `  - id: ${floor.id}`,
             `    name: ${floor.name}`,
+            ...(floor.icon ? [`    icon: ${floor.icon}`] : []),
             ...(floor.image ? [`    image: ${floor.image}`] : []),
             ...(floor.model ? [`    model: ${floor.model}`] : []),
             ...floorDefaultView,
@@ -12835,7 +12837,17 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
 
         .floor-config-actions {
           display: flex;
+          align-items: center;
           gap: 6px;
+        }
+
+        .floor-config-actions .move-button {
+          min-width: 0;
+          --mdc-icon-size: 18px;
+        }
+
+        .floor-config-actions .move-button[disabled] {
+          opacity: 0.35;
         }
 
         @media (max-width: 600px) {
@@ -13013,8 +13025,9 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       return `
         <article class="floor-config-card">
           <header>
-            <strong>${this._escape(label)}</strong>
+            <strong>${floor.icon ? `<ha-icon icon="${this._escape(floor.icon)}"></ha-icon> ` : ""}${this._escape(label)}</strong>
             <div class="floor-config-actions">
+              ${this._moveButtons("floor", index, floors.length)}
               <ha-button data-floor-edit="${index}" aria-label="${editing ? "Stop editing" : "Edit floor"}">${editing ? "Done" : "Edit"}</ha-button>
               <ha-button data-floor-remove="${index}" aria-label="Remove floor">Remove</ha-button>
             </div>
@@ -13023,6 +13036,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <div class="editor-grid">
             <ha-input class="editor-field" data-floor-field="id" data-floor-index="${index}" label="ID" type="text" value="${this._escape(floor.id || "")}"></ha-input>
             <ha-input class="editor-field" data-floor-field="name" data-floor-index="${index}" label="Name" type="text" value="${this._escape(floor.name || "")}"></ha-input>
+            <ha-input class="editor-field" data-floor-field="icon" data-floor-index="${index}" label="Icon" type="text" value="${this._escape(floor.icon || "")}" placeholder="mdi:home-floor-0"></ha-input>
             <ha-input class="editor-field" data-floor-field="model" data-floor-index="${index}" label="Model URL" type="text" value="${this._escape(floor.model || "")}" placeholder="/local/floorplans/floor.glb"></ha-input>
           </div>
           ` : ""}
@@ -13042,6 +13056,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         <header>
           <strong>${layer.icon ? `<ha-icon icon="${this._escape(layer.icon)}"></ha-icon> ` : ""}${this._escape(layer.name || layer.id || `Layer ${index + 1}`)}</strong>
           <div class="floor-config-actions">
+            ${this._moveButtons("layer", index, layers.length)}
             <ha-button data-layer-edit="${index}" aria-label="${editing ? "Stop editing" : "Edit layer"}">${editing ? "Done" : "Edit"}</ha-button>
             <ha-button data-layer-remove="${index}" aria-label="Remove layer">Remove</ha-button>
           </div>
@@ -13088,6 +13103,31 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
     this._render();
   }
 
+  _moveButtons(kind, index, count) {
+    return [[-1, "mdi:chevron-up", "Move up"], [1, "mdi:chevron-down", "Move down"]]
+      .map(([delta, icon, label]) => {
+        const disabled = index + delta < 0 || index + delta >= count;
+        return `<ha-button class="move-button" data-move-item="${kind}" data-item-index="${index}" data-move-by="${delta}" aria-label="${label}" title="${label}" ${disabled ? "disabled" : ""}><ha-icon icon="${icon}"></ha-icon></ha-button>`;
+      })
+      .join("");
+  }
+
+  // Floors and layers show in their list order (navigation card, layer switcher).
+  _moveConfigItem(kind, index, delta) {
+    const key = kind === "floor" ? "floors" : "layers";
+    const nextConfig = JSON.parse(JSON.stringify(this._config || {}));
+    const list = nextConfig[key];
+    const to = index + delta;
+    if (!Array.isArray(list) || !list[index] || to < 0 || to >= list.length) return;
+    const [moved] = list.splice(index, 1);
+    list.splice(to, 0, moved);
+    const editingKey = kind === "floor" ? "_editingFloorIndex" : "_editingLayerIndex";
+    if (this[editingKey] === index) this[editingKey] = to;
+    else if (this[editingKey] === to) this[editingKey] = index;
+    this._commitConfig(nextConfig);
+    this._render();
+  }
+
   _removeLayer(index) {
     const nextConfig = JSON.parse(JSON.stringify(this._config || {}));
     if (!Array.isArray(nextConfig.layers) || !nextConfig.layers[index]) return;
@@ -13102,11 +13142,14 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
   _handleFloorInput(input) {
     const index = Number(input.dataset.floorIndex);
     const key = input.dataset.floorField;
-    if (!Number.isInteger(index) || !["id", "name", "model"].includes(key)) return;
+    if (!Number.isInteger(index) || !["id", "name", "icon", "model"].includes(key)) return;
     const nextConfig = JSON.parse(JSON.stringify(this._config || {}));
     if (!Array.isArray(nextConfig.floors) || !nextConfig.floors[index]) return;
-    nextConfig.floors[index][key] = input.value.trim();
+    const value = input.value.trim();
+    if (key === "icon" && !value) delete nextConfig.floors[index].icon;
+    else nextConfig.floors[index][key] = value;
     this._commitConfig(nextConfig);
+    if (key === "icon" || key === "name") this._render();
   }
 
   _addFloor() {
@@ -13266,6 +13309,12 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         const index = Number(button.dataset.floorEdit);
         this._editingFloorIndex = this._editingFloorIndex === index ? null : index;
         this._render();
+      });
+    });
+    this.querySelectorAll("[data-move-item]").forEach((button) => {
+      button.addEventListener("click", () => {
+        if (button.hasAttribute("disabled")) return;
+        this._moveConfigItem(button.dataset.moveItem, Number(button.dataset.itemIndex), Number(button.dataset.moveBy));
       });
     });
     this.querySelectorAll("[data-floor-remove]").forEach((button) => {
@@ -14150,7 +14199,7 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
     const state = this._state;
     const groups = {
       floors: state.floors.length > 1
-        ? { kind: "floor", title: this._text("floors"), items: state.floors.map((floor) => ({ value: floor.id, name: floor.name, icon: "mdi:stairs", active: floor.id === state.activeFloor })) }
+        ? { kind: "floor", title: this._text("floors"), items: state.floors.map((floor) => ({ value: floor.id, name: floor.name, icon: floor.icon || "mdi:stairs", active: floor.id === state.activeFloor })) }
         : null,
       layers: state.layers.length
         ? { kind: "layer", title: this._text("layers"), items: [{ id: "", name: this._text("all"), icon: "mdi:layers-outline" }, ...state.layers].map((layer) => ({ value: layer.id, name: layer.name, icon: layer.icon, active: layer.id === state.activeLayer })) }
