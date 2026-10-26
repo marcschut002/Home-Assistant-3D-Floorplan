@@ -321,7 +321,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       layers: this._layers.map((layer) => ({ id: layer.id, name: layer.name, icon: layer.icon })),
       activeLayer: this._activeLayer === NO_LAYER ? "" : this._activeLayer,
       views: [
-        ...(this._modelDefaultViews?.[floorId] ? [{ id: "default", name: "Home", icon: "mdi:home-outline", color: "" }] : []),
+        ...(this._modelDefaultViews?.[floorId]
+          ? [{ id: "default", name: this._modelDefaultViews[floorId].name || "", icon: this._modelDefaultViews[floorId].icon || "mdi:home-outline", color: "" }]
+          : []),
         ...Object.keys(namedViews)
           .map((name) => ({ id: name, name, icon: namedViews[name]?.icon || "mdi:camera-outline", color: namedViews[name]?.icon_color || "" })),
       ],
@@ -1467,6 +1469,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const near = Number(view.near);
     const far = Number(view.far);
     const icon = String(view.icon || "").trim();
+    const name = String(view.name || "").trim();
     const iconPosition = this._numberArray(view.icon_position || view.iconPosition, 3);
     const iconColor = this._normalizeHexColor(view.icon_color || view.iconColor);
     return {
@@ -1475,6 +1478,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ...(Number.isFinite(zoom) && zoom > 0 ? { zoom } : {}),
       ...(Number.isFinite(near) && near > 0 ? { near } : {}),
       ...(Number.isFinite(far) && far > 0 ? { far } : {}),
+      ...(name ? { name } : {}),
       ...(icon ? { icon } : {}),
       ...(icon && iconPosition ? { icon_position: iconPosition } : {}),
       ...(icon && iconColor ? { icon_color: iconColor } : {}),
@@ -2975,17 +2979,18 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const draft = this._modelViewDraft || { name: "", position: [], target: [], zoom: 1, icon: "", iconPosition: [], iconColor: "", iconOnModel: true };
     const value = (items, index) => items?.[index] ?? "";
     if (!this._viewDetailOpen) {
-      const hasHome = Boolean(this._modelDefaultViews?.[this._activeFloorId || "default"]);
+      const home = this._modelDefaultViews?.[this._activeFloorId || "default"];
+      const hasHome = Boolean(home);
       return `
         <div class="sidebar-list-header">
           <strong>Camera views</strong>
           <button type="button" class="sidebar-add" data-view-new><ha-icon icon="mdi:plus"></ha-icon>New view</button>
         </div>
         <div class="sidebar-list">
-          <div class="sidebar-row static">
-            <span class="dot"><ha-icon icon="mdi:home-outline"></ha-icon></span>
+          <div class="sidebar-row" data-view-home-open role="button" tabindex="0">
+            <span class="dot"><ha-icon icon="${this._escape(home?.icon || "mdi:home-outline")}"></ha-icon></span>
             <span class="device-text">
-              <strong>Home</strong>
+              <strong>${this._escape(home?.name || "Home")}</strong>
               <small>${hasHome ? "Startup view" : "Not set - uses the fitted model"}</small>
             </span>
             <span class="row-badges">
@@ -3014,15 +3019,19 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         ${Object.keys(floorViews).length ? "" : `<div class="empty-list">Move the camera to a nice spot, then press New view.</div>`}
       `;
     }
-    const existing = Boolean(draft.originalName && floorViews[draft.originalName]);
+    const isHome = Boolean(draft.isHome);
+    const existing = isHome
+      ? Boolean(this._modelDefaultViews?.[this._activeFloorId || "default"])
+      : Boolean(draft.originalName && floorViews[draft.originalName]);
     return `
       <div class="sidebar-detail-header">
         <button type="button" class="sidebar-back" data-view-back><ha-icon icon="mdi:arrow-left"></ha-icon>Views</button>
       </div>
-      <strong class="sidebar-detail-title">${this._escape(existing ? draft.originalName : "New view")}</strong>
+      <strong class="sidebar-detail-title">${this._escape(isHome ? "Home view" : existing ? draft.originalName : "New view")}</strong>
+      ${isHome ? `<div class="sidebar-hint">The view the floor starts in. Name and icon are used on its button in the navigation card; empty keeps "Home".</div>` : ""}
       <label>
         <span>Name</span>
-        <input data-view-name value="${this._escape(draft.name || "")}" placeholder="Living room" />
+        <input data-view-name value="${this._escape(draft.name || "")}" placeholder="${isHome ? "Home" : "Living room"}" />
       </label>
       <div class="view-actions">
         <button type="button" data-view-use-current>Use current camera</button>
@@ -3055,9 +3064,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       </details>
       <label class="view-icon-picker">
         <span>View icon</span>
-        <ha-icon-picker data-view-icon value="${this._escape(draft.icon || "")}"></ha-icon-picker>
+        <ha-icon-picker data-view-icon value="${this._escape(draft.icon || "")}" ${isHome ? `placeholder="mdi:home-outline"` : ""}></ha-icon-picker>
       </label>
-      ${draft.icon ? `
+      ${draft.icon && !isHome ? `
       <div class="view-icon-color">
         <label>
           <span>Icon color</span>
@@ -3083,7 +3092,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         <button type="button" data-view-icon-position-clear>Use Target</button>
       </div>`}` : ""}
       <button type="button" class="panel-button primary" data-view-save>Save view</button>
-      ${existing ? `<button type="button" class="panel-button danger" data-view-remove="${this._escape(draft.originalName)}">Remove view</button>` : ""}
+      ${existing && isHome ? `<button type="button" class="panel-button danger" data-view-home="clear">Clear Home view</button>` : ""}
+      ${existing && !isHome ? `<button type="button" class="panel-button danger" data-view-remove="${this._escape(draft.originalName)}">Remove view</button>` : ""}
     `;
   }
 
@@ -3130,6 +3140,22 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         if (viewer?.camera && viewer?.controls) this._animateModelCameraView(this._modelViewDraft, viewer.camera, viewer.controls);
       });
     });
+    root?.querySelectorAll("[data-view-home-open]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        if (event.target.closest?.("[data-view-home]")) return;
+        const home = this._modelDefaultViews?.[this._activeFloorId || "default"];
+        const camera = home || this._currentModelCameraView() || {};
+        this._modelViewDraft = { isHome: true, name: home?.name || "", position: [...(camera.position || [])], target: [...(camera.target || [])], zoom: camera.zoom || 1, icon: home?.icon || "", iconPosition: [], iconColor: "", iconOnModel: true };
+        this._pendingViewIconPick = false;
+        this._viewDetailOpen = true;
+        this._refreshModelViewTools();
+      });
+      element.addEventListener("keydown", (event) => {
+        if (event.target !== event.currentTarget || !["Enter", " "].includes(event.key)) return;
+        event.preventDefault();
+        event.currentTarget.click();
+      });
+    });
     root?.querySelectorAll("[data-view-home]").forEach((element) => {
       element.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -3139,7 +3165,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           return;
         }
         if (action === "save") this._saveCurrentModelDefaultView();
-        if (action === "clear") this._clearCurrentModelDefaultView();
+        if (action === "clear") {
+          this._clearCurrentModelDefaultView();
+          this._viewDetailOpen = false;
+        }
         this._refreshModelViewTools();
       });
     });
@@ -3277,6 +3306,17 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const position = this._numberArray(this._modelViewDraft?.position, 3);
     const target = this._numberArray(this._modelViewDraft?.target, 3);
     const zoom = Number(this._modelViewDraft?.zoom);
+    if (this._modelViewDraft?.isHome) {
+      if (!position || !target || !Number.isFinite(zoom) || zoom <= 0) return;
+      const icon = String(this._modelViewDraft?.icon || "").trim();
+      this._modelDefaultViews[this._activeFloorId || "default"] = { position, target, zoom, ...(name ? { name } : {}), ...(icon ? { icon } : {}) };
+      this._pendingViewIconPick = false;
+      this._viewDetailOpen = false;
+      this._saveModelDefaultViews();
+      this._refreshModelViewTools();
+      this._showModelStatus("Home view saved.");
+      return;
+    }
     if (!name || !position || !target || !Number.isFinite(zoom) || zoom <= 0) return;
     const floorId = this._activeFloorId || "default";
     this._modelViews[floorId] = this._modelViews[floorId] || {};
@@ -3871,7 +3911,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _saveCurrentModelDefaultView() {
     const view = this._currentModelCameraView();
     if (!view) return;
-    this._modelDefaultViews[this._activeFloorId || "default"] = view;
+    const floorId = this._activeFloorId || "default";
+    const { name, icon } = this._modelDefaultViews[floorId] || {};
+    this._modelDefaultViews[floorId] = { ...view, ...(name ? { name } : {}), ...(icon ? { icon } : {}) };
     this._saveModelDefaultViews();
     this._showModelStatus("Startup view saved.");
   }
@@ -6028,6 +6070,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       `${indent}  position: ${formatArray(normalized.position)}`,
       `${indent}  target: ${formatArray(normalized.target)}`,
       ...(Number.isFinite(normalized.zoom) ? [`${indent}  zoom: ${Number(normalized.zoom).toFixed(4)}`] : []),
+      ...(normalized.name ? [`${indent}  name: ${JSON.stringify(normalized.name)}`] : []),
+      ...(normalized.icon ? [`${indent}  icon: ${normalized.icon}`] : []),
     ];
   }
 
@@ -14256,7 +14300,7 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
         ? { kind: "layer", title: this._text("layers"), items: [{ id: "", name: this._text("all"), icon: "mdi:layers-outline" }, ...state.layers].map((layer) => ({ value: layer.id, name: layer.name, icon: layer.icon, active: layer.id === state.activeLayer })) }
         : null,
       views: state.views.length
-        ? { kind: "view", title: this._text("views"), items: state.views.map((view) => ({ value: view.id, name: view.id === "default" ? this._text("home") : view.name, icon: view.icon, color: view.color, active: view.id === state.activeView })) }
+        ? { kind: "view", title: this._text("views"), items: state.views.map((view) => ({ value: view.id, name: view.id === "default" ? view.name || this._text("home") : view.name, icon: view.icon, color: view.color, active: view.id === state.activeView })) }
         : null,
     };
     return this._config.show.map((key) => groups[key]).filter(Boolean);

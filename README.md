@@ -418,7 +418,12 @@ default_view:
   position: [6.2500, 4.5000, 8.7500]
   target: [0.0000, 0.8000, 0.0000]
   zoom: 1.0000
+  name: Overzicht          # optional, label of its navigation card button
+  icon: mdi:eye            # optional, icon of that button
 ```
+
+Click the **Home** row to give the Home view its own name and icon. Without a name
+the navigation card shows "Home" (or the `home` label / Dutch "Thuis").
 
 ## Brightness Areas (Lighting Zones)
 
