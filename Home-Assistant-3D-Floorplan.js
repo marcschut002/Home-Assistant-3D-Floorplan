@@ -3085,6 +3085,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _bindModelViewTools(root = this.shadowRoot) {
+    this._syncIconPickers(root);
     root?.querySelectorAll("[data-view-use-current]").forEach((element) => {
       element.addEventListener("click", () => {
         const view = this._currentModelCameraView();
@@ -5119,7 +5120,14 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     });
   }
 
+  _syncIconPickers(root) {
+    root?.querySelectorAll?.("ha-icon-picker").forEach((picker) => {
+      picker.hass = this._hass;
+    });
+  }
+
   _bindDeviceRowControls(rowElement) {
+    this._syncIconPickers(rowElement);
     rowElement.querySelectorAll("[data-locate-marker]").forEach((element) => {
       element.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -5613,7 +5621,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       <label class="icon-picker">
         <span>Icon</span>
         <div class="icon-picker-control">
-          <ha-icon-picker data-icon="${this._escape(row.key)}" value="${selected === "auto" ? "" : this._escape(selected)}"></ha-icon-picker>
+          <ha-icon-picker data-icon="${this._escape(row.key)}" value="${selected === "auto" ? "" : this._escape(selected)}" placeholder="${this._escape(this._defaultIcon(row))}"></ha-icon-picker>
           <button type="button" data-icon-auto="${this._escape(row.key)}" title="Use entity default icon">Auto</button>
         </div>
       </label>
@@ -12545,6 +12553,13 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
     this._editingLayerIndex = null;
   }
 
+  set hass(hass) {
+    this._hass = hass;
+    this.querySelectorAll("ha-icon-picker").forEach((picker) => {
+      picker.hass = hass;
+    });
+  }
+
   setConfig(config) {
     this._config = { ...(config || {}) };
     const scopeMatch = /^floor:(\d+)$/.exec(this._objectConfigScope || "");
@@ -13036,7 +13051,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <div class="editor-grid">
             <ha-input class="editor-field" data-floor-field="id" data-floor-index="${index}" label="ID" type="text" value="${this._escape(floor.id || "")}"></ha-input>
             <ha-input class="editor-field" data-floor-field="name" data-floor-index="${index}" label="Name" type="text" value="${this._escape(floor.name || "")}"></ha-input>
-            <ha-input class="editor-field" data-floor-field="icon" data-floor-index="${index}" label="Icon" type="text" value="${this._escape(floor.icon || "")}" placeholder="mdi:home-floor-0"></ha-input>
+            <ha-icon-picker class="editor-field" data-floor-field="icon" data-floor-index="${index}" label="Icon" value="${this._escape(floor.icon || "")}" placeholder="mdi:stairs"></ha-icon-picker>
             <ha-input class="editor-field" data-floor-field="model" data-floor-index="${index}" label="Model URL" type="text" value="${this._escape(floor.model || "")}" placeholder="/local/floorplans/floor.glb"></ha-input>
           </div>
           ` : ""}
@@ -13065,7 +13080,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
         <div class="editor-grid">
           <ha-input class="editor-field" data-layer-field="name" data-layer-index="${index}" label="Name" type="text" value="${this._escape(layer.name || "")}" placeholder="Lighting"></ha-input>
           <ha-input class="editor-field" data-layer-field="id" data-layer-index="${index}" label="ID" type="text" value="${this._escape(layer.id || "")}" placeholder="lighting"></ha-input>
-          <ha-input class="editor-field" data-layer-field="icon" data-layer-index="${index}" label="Icon" type="text" value="${this._escape(layer.icon || "")}" placeholder="mdi:lightbulb-group"></ha-input>
+          <ha-icon-picker class="editor-field" data-layer-field="icon" data-layer-index="${index}" label="Icon" value="${this._escape(layer.icon || "")}" placeholder="mdi:layers"></ha-icon-picker>
           <ha-select class="editor-field" data-layer-field="marker_display" data-layer-index="${index}" label="Marker Display" value="${this._escape(layer.marker_display || "")}">${[["", "Marker setting"], ["icon", "Icon"], ["value", "Value"]].map(([value, label]) => `<ha-list-item value="${value}">${label}</ha-list-item>`).join("")}</ha-select>
           <ha-input class="editor-field" data-layer-field="domains" data-layer-index="${index}" label="Domains" type="text" value="${this._escape(list(layer.domains))}" placeholder="light"></ha-input>
           <ha-input class="editor-field" data-layer-field="device_classes" data-layer-index="${index}" label="Device Classes" type="text" value="${this._escape(list(layer.device_classes))}" placeholder="temperature, humidity"></ha-input>
@@ -13281,6 +13296,18 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
   }
 
   _attachEditorEvents() {
+    // Icon pickers search and complete like Home Assistant's own icon fields.
+    this.querySelectorAll("ha-icon-picker").forEach((element) => {
+      element.hass = this._hass;
+      element.value = element.getAttribute("value") || "";
+      element.addEventListener("value-changed", (event) => {
+        const value = String(event.detail?.value ?? "").trim();
+        if (value === (element.getAttribute("value") || "")) return;
+        element.value = value;
+        if (element.dataset.floorField) this._handleFloorInput(element);
+        if (element.dataset.layerField) this._handleLayerInput(element);
+      });
+    });
     this.querySelectorAll("ha-input").forEach((element) => {
       if (element.hasAttribute("value")) element.value = element.getAttribute("value") || "";
     });
