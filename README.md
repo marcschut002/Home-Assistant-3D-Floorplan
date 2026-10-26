@@ -305,7 +305,10 @@ tap_action:
   navigation_path: "#hafp_floor=first&hafp_view=living_room"
 ```
 
-`hafp_floor` must match the floor `id`, not its display name.
+`hafp_floor` must match the floor `id`, not its display name. A link is applied
+once: choosing another floor or view afterwards (navigation card, view icons) is not
+undone while the link stays in the address bar. Switching floors always starts in
+that floor's Home view.
 The hash format keeps the current Lovelace page in place and avoids a route refresh.
 
 For multiple floors, put `views` inside the relevant floor. The named view is

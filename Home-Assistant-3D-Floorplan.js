@@ -216,7 +216,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const modelHeight = String(this._config.model_height || "").trim();
     if (modelHeight) this.style.setProperty("--hafp-model-height", modelHeight);
     else this.style.removeProperty("--hafp-model-height");
-    const requestedFloorId = this._requestedModelFloorId();
+    const navigationKey = this._requestedNavigationKey();
+    const newRequest = navigationKey !== this._handledNavigationKey;
+    if (newRequest) {
+      this._handledNavigationKey = navigationKey;
+      this._pendingRequestedView = true;
+    }
+    const requestedFloorId = newRequest ? this._requestedModelFloorId() : "";
     this._activeFloorId = this._floors.some((floor) => floor.id === requestedFloorId)
       ? requestedFloorId
       : this._floors.some((floor) => floor.id === this._activeFloorId)
@@ -225,7 +231,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._activeRequestedModelView = "";
     this._activeModelView = "default";
     this._layers = this._normalizedLayers(this._config.layers);
-    this._activeLayer = this._layerById(this._requestedLayerId() || this._config.default_layer)?.id || "";
+    this._activeLayer = this._layerById((newRequest && this._requestedLayerId()) || this._activeLayer || this._config.default_layer)?.id || "";
     this._display = this._normalizedDisplay({
       markerSize: this._config.marker_size,
       showLabels: this._config.show_labels,
@@ -2737,7 +2743,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._selectionBox = null;
     this._activeRequestedModelView = "";
     this._activeModelView = "default";
-    // Start the new floor in its own Home view, not where the camera was on the last floor.
+    // Start the new floor in its own Home view, not where the camera was on the last floor
+    // (rendering would otherwise save the old camera again while disposing the viewer).
+    this._disposeModelViewer({ preserveCamera: true });
     this._modelCameraState = null;
     this._mapScroll = { left: 0, top: 0, leftRatio: 0, topRatio: 0 };
     this._render();
@@ -3758,7 +3766,17 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     }
   }
 
+  // The hafp_ parameters of the current URL; a link is applied once, so later floor or
+  // view changes are not undone by Home Assistant's other location events.
+  _requestedNavigationKey() {
+    return this._requestedNavigationParams().toString();
+  }
+
   _applyRequestedNavigation() {
+    const navigationKey = this._requestedNavigationKey();
+    if (navigationKey === this._handledNavigationKey) return false;
+    this._handledNavigationKey = navigationKey;
+    this._pendingRequestedView = true;
     const layerId = this._requestedLayerId();
     if (layerId.toLowerCase() === "all" || this._layerById(layerId)) this._setActiveLayer(layerId);
     const floorId = this._requestedModelFloorId();
@@ -3777,6 +3795,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     }
     const view = this._modelViews?.[this._activeFloorId || "default"]?.[name];
     if (!view || !this._modelViewer?.camera || !this._modelViewer?.controls) return false;
+    this._pendingRequestedView = false;
     this._activeRequestedModelView = name;
     this._setActiveModelView(name);
     return this._animateModelCameraView(view, this._modelViewer.camera, this._modelViewer.controls);
@@ -6743,7 +6762,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           disposed = true;
         },
       };
-      this._applyRequestedModelView();
+      if (this._pendingRequestedView) {
+        this._applyRequestedModelView();
+        this._pendingRequestedView = false;
+      }
       this._applyZoneDrawingState();
       this._refresh3DZoneOverlay();
       animate();
