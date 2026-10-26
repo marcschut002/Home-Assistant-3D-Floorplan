@@ -2737,6 +2737,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._selectionBox = null;
     this._activeRequestedModelView = "";
     this._activeModelView = "default";
+    // Start the new floor in its own Home view, not where the camera was on the last floor.
+    this._modelCameraState = null;
     this._mapScroll = { left: 0, top: 0, leftRatio: 0, topRatio: 0 };
     this._render();
     this._broadcastNavState();
