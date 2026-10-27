@@ -108,6 +108,34 @@ the camera keeps the current view active. When the card loads, `default` is acti
 In Edit Mode, markers that are hidden for the current view appear faded. Tick the
 views under **Visible in views** in the marker panel.
 
+### Area Position
+
+Some devices report the room they are in, such as a robot vacuum with a "current
+room" sensor. Set `area_entity` on the marker to that sensor. While the marker's
+entity is in one of its `active_states` (default `cleaning`), the marker moves to the
+centre of the brightness area whose name matches the sensor state. Case, spaces,
+`_` and `-` are ignored, so `woon_kamer` matches an area named **Woon Kamer**.
+Otherwise the marker stays at its own position, for example on the dock.
+
+```yaml
+markers:
+  - entity: vacuum.roborock
+    layers: [vacuum]
+    area_entity: sensor.roborock_current_room
+    active_states: [cleaning, returning]   # optional, defaults to [cleaning]
+    floor_entity: select.roborock_selected_map   # optional, with floors only
+```
+
+With `floors`, `floor_entity` names the floor the device is on, matched to the floor's
+name or id in the same way. Markers are stored per floor, so place the marker on each
+floor where the device can be, with the same settings. A marker then shows only on the
+floor that `floor_entity` names: in the matching area while active, otherwise at its own
+position on that floor. A state that matches no floor is ignored.
+
+The marker keeps its own height. In Edit Mode it always shows at its own position, so
+it can be moved. Vacuum markers show these fields under **Area position** in the
+marker panel.
+
 ### Color Thresholds
 
 Use `color_thresholds` to color a marker dynamically based on its numeric state value. This is particularly useful for temperature, humidity, CO₂, or any sensor with a continuous numeric reading.

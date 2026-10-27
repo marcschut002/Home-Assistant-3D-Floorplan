@@ -934,6 +934,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         tapAction: this._normalizeMarkerAction(marker.tap_action || marker.tapAction, "tap"),
         holdAction: this._normalizeMarkerAction(marker.hold_action || marker.holdAction, "hold"),
         navigationPath: this._normalizeNavigationPath(marker.navigation_path || marker.navigationPath),
+        areaEntity: this._normalizeEntityId(marker.area_entity || marker.areaEntity),
+        floorEntity: this._normalizeEntityId(marker.floor_entity || marker.floorEntity),
+        activeStates: this._normalizeViewNames(marker.active_states || marker.activeStates),
         lightIntensity: this._normalizeLightIntensity(marker.light_intensity ?? marker.lightIntensity),
         lightType: this._normalizeLightType(marker.light_type ?? marker.lightType),
         lightRadius: this._normalizeLightRadius(marker.light_radius ?? marker.lightRadius),
@@ -976,6 +979,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         tapAction: this._normalizeMarkerAction(marker.tapAction || marker.tap_action, "tap"),
         holdAction: this._normalizeMarkerAction(marker.holdAction || marker.hold_action, "hold"),
         navigationPath: this._normalizeNavigationPath(marker.navigationPath || marker.navigation_path),
+        areaEntity: this._normalizeEntityId(marker.areaEntity || marker.area_entity),
+        floorEntity: this._normalizeEntityId(marker.floorEntity || marker.floor_entity),
+        activeStates: this._normalizeViewNames(marker.activeStates || marker.active_states),
         lightIntensity: this._normalizeLightIntensity(marker.lightIntensity ?? marker.light_intensity),
         lightType: this._normalizeLightType(marker.lightType ?? marker.light_type),
         lightRadius: this._normalizeLightRadius(marker.lightRadius ?? marker.light_radius),
@@ -4231,6 +4237,37 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     `;
   }
 
+  _areaPositionEditor(row) {
+    const marker = this._markers[row.key] || {};
+    if (row?.primaryDomain !== "vacuum" && !marker.areaEntity && !marker.floorEntity) return "";
+    const listId = `area-entity-list-${row.key.replace(/[^a-z0-9_-]/gi, "-")}`;
+    return `
+      <div class="action-editor">
+        <label class="navigation-path-editor">
+          <span>Area sensor</span>
+          <input data-marker-area-entity="${this._escape(row.key)}" type="text" list="${this._escape(listId)}" value="${this._escape(marker.areaEntity || "")}" placeholder="sensor.vacuum_current_room" autocomplete="off" />
+          <datalist id="${this._escape(listId)}">
+            ${Object.keys(this._hass?.states || {})
+              .filter((id) => id.startsWith("sensor.") || id.startsWith("select.") || id.startsWith("input_select."))
+              .sort()
+              .map((id) => `<option value="${this._escape(id)}">${this._escape(this._hass.states[id]?.attributes?.friendly_name || id)}</option>`)
+              .join("")}
+          </datalist>
+        </label>
+        ${this._hasMultipleFloors() ? `
+        <label class="navigation-path-editor">
+          <span>Floor sensor</span>
+          <input data-marker-floor-entity="${this._escape(row.key)}" type="text" list="${this._escape(listId)}" value="${this._escape(marker.floorEntity || "")}" placeholder="select.vacuum_selected_map" autocomplete="off" />
+        </label>` : ""}
+        <label class="navigation-path-editor">
+          <span>Active states</span>
+          <input data-marker-active-states="${this._escape(row.key)}" type="text" value="${this._escape((marker.activeStates || []).join(", "))}" placeholder="cleaning" />
+        </label>
+        <small class="navigation-path-editor">While active, the marker moves to the centre of the area whose name matches the sensor state. Otherwise it stays at its own position.${this._hasMultipleFloors() ? " With a floor sensor, it only shows on the floor that sensor names, so place it on each floor." : ""}</small>
+      </div>
+    `;
+  }
+
   _lightIntensityEditor(row) {
     if (row?.primaryDomain !== "light") return "";
     const marker = this._markers[row.key] || {};
@@ -4669,6 +4706,69 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return [...new Set(names.map((name) => String(name ?? "").trim()).filter(Boolean))];
   }
 
+  _normalizeEntityId(value) {
+    const entityId = String(value ?? "").trim();
+    return /^[a-z0-9_]+\.[a-z0-9_]+$/i.test(entityId) ? entityId : "";
+  }
+
+  // "Woon Kamer", "woon_kamer" and "woon-kamer" all give the same slug.
+  _stateSlug(value) {
+    return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  }
+
+  // floor_entity: the marker only shows on the floor named by that entity's state.
+  // A state that matches no floor is ignored, and Edit Mode always shows the marker.
+  _isMarkerOnOtherFloor(marker) {
+    if (this._mode === "edit" || !marker?.floorEntity || !this._hasMultipleFloors()) return false;
+    const slug = this._stateSlug(this._hass?.states?.[marker.floorEntity]?.state);
+    const floor = slug && this._floors.find((item) => this._stateSlug(item.id) === slug || this._stateSlug(item.name) === slug);
+    return Boolean(floor) && floor.id !== this._activeFloorId;
+  }
+
+  // area_entity: while the marker's entity is in one of its active_states (default
+  // "cleaning"), the marker moves to the centre of the area named by that sensor's
+  // state. Otherwise, and in Edit Mode, it stays at its own (dock) position.
+  _markerAreaPoint(row, marker) {
+    if (this._mode === "edit" || !marker?.areaEntity) return null;
+    const activeStates = marker.activeStates?.length ? marker.activeStates : ["cleaning"];
+    const state = String(this._hass?.states?.[row.entityId]?.state ?? "").toLowerCase();
+    if (!activeStates.some((activeState) => activeState.toLowerCase() === state)) return null;
+    const areaName = this._hass?.states?.[marker.areaEntity]?.state;
+    if (!areaName || ["unknown", "unavailable"].includes(areaName)) return null;
+    const slug = this._stateSlug(areaName);
+    const zone = Object.values(this._zones || {}).find((item) => this._stateSlug(item.id) === slug || this._stateSlug(item.name) === slug);
+    const centre = zone ? this._zoneCentre(zone) : null;
+    if (!centre) return null;
+    // Keep the marker's own height; only the floor position follows the area.
+    const markerPoint = this._modelToDisplayPoint(marker);
+    const [firstAxis, secondAxis] = this._floorAxes();
+    return this._displayToModelPoint({ ...markerPoint, [firstAxis]: centre[firstAxis], [secondAxis]: centre[secondAxis] });
+  }
+
+  _zoneCentre(zone) {
+    const [firstAxis, secondAxis] = this._floorAxes();
+    const points = (zone.points || []).map((point) => this._modelToDisplayPoint(point));
+    if (points.length < 3) return null;
+    // Polygon centroid; falls back to the average of the points for degenerate shapes.
+    let area = 0;
+    let first = 0;
+    let second = 0;
+    points.forEach((point, index) => {
+      const next = points[(index + 1) % points.length];
+      const cross = point[firstAxis] * next[secondAxis] - next[firstAxis] * point[secondAxis];
+      area += cross;
+      first += (point[firstAxis] + next[firstAxis]) * cross;
+      second += (point[secondAxis] + next[secondAxis]) * cross;
+    });
+    if (Math.abs(area) < 1e-6) {
+      return {
+        [firstAxis]: points.reduce((sum, point) => sum + point[firstAxis], 0) / points.length,
+        [secondAxis]: points.reduce((sum, point) => sum + point[secondAxis], 0) / points.length,
+      };
+    }
+    return { [firstAxis]: first / (3 * area), [secondAxis]: second / (3 * area) };
+  }
+
   _isMarkerOutsideActiveView(row) {
     const views = this._markers[row?.key]?.visibleInViews;
     return Array.isArray(views) && views.length > 0 && !views.includes(this._activeModelView);
@@ -5056,7 +5156,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           ["appearance", "Appearance", this._appearanceSummary(row), `${this._iconSelect(row)}${this._markerDisplayEditor(row)}${this._colorThresholdEditor(row)}`],
           ["visibility", "Visibility", this._visibilitySummary(row), `${this._markerViewsEditor(row)}${this._markerLayersEditor(row)}`],
           ["actions", "Actions", this._actionsSummary(row), this._actionEditor(row)],
-          ["light", "Light", this._lightSummary(row), this._lightIntensityEditor(row)],
+          ["area-position", "Area position", [marker.areaEntity, marker.floorEntity].filter(Boolean).join(" · ") || "Off", this._areaPositionEditor(row)],
+          ["light","Light", this._lightSummary(row), this._lightIntensityEditor(row)],
         ].filter(([, , , body]) => body.trim())
       : [];
     const positionBody = `
@@ -5268,6 +5369,27 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       element.addEventListener("pointerdown", (event) => event.stopPropagation());
       element.addEventListener("change", (event) => {
         this._updateMarkerNavigationPath(event.currentTarget.dataset.markerNavigationPath, event.currentTarget.value);
+      });
+    });
+
+    rowElement.querySelectorAll("[data-marker-area-entity]").forEach((element) => {
+      element.addEventListener("pointerdown", (event) => event.stopPropagation());
+      element.addEventListener("change", (event) => {
+        this._updateMarkerAreaPosition(event.currentTarget.dataset.markerAreaEntity, "areaEntity", this._normalizeEntityId(event.currentTarget.value));
+      });
+    });
+
+    rowElement.querySelectorAll("[data-marker-floor-entity]").forEach((element) => {
+      element.addEventListener("pointerdown", (event) => event.stopPropagation());
+      element.addEventListener("change", (event) => {
+        this._updateMarkerAreaPosition(event.currentTarget.dataset.markerFloorEntity, "floorEntity", this._normalizeEntityId(event.currentTarget.value));
+      });
+    });
+
+    rowElement.querySelectorAll("[data-marker-active-states]").forEach((element) => {
+      element.addEventListener("pointerdown", (event) => event.stopPropagation());
+      element.addEventListener("change", (event) => {
+        this._updateMarkerAreaPosition(event.currentTarget.dataset.markerActiveStates, "activeStates", this._normalizeViewNames(event.currentTarget.value));
       });
     });
 
@@ -5896,6 +6018,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
                     `        tap_action: ${marker.tapAction}`,
                     `        hold_action: ${marker.holdAction}`,
                     ...(marker.navigationPath ? [`        navigation_path: ${JSON.stringify(marker.navigationPath)}`] : []),
+                    ...(marker.areaEntity ? [`        area_entity: ${marker.areaEntity}`] : []),
+                    ...(marker.floorEntity ? [`        floor_entity: ${marker.floorEntity}`] : []),
+                    ...(marker.activeStates.length ? [`        active_states: ${JSON.stringify(marker.activeStates)}`] : []),
                     ...(marker.lightIntensity !== "" ? [`        light_intensity: ${marker.lightIntensity}`] : []),
                     ...(marker.lightType ? [`        light_type: ${this._threeLightTypeName(marker.lightType)}`, `        light_radius: ${marker.lightRadius || 1.5}`] : []),
                     ...(marker.lightPreset ? [`        light_preset: ${marker.lightPreset}`] : []),
@@ -5971,6 +6096,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               `    tap_action: ${marker.tapAction}`,
               `    hold_action: ${marker.holdAction}`,
               ...(marker.navigationPath ? [`    navigation_path: ${JSON.stringify(marker.navigationPath)}`] : []),
+              ...(marker.areaEntity ? [`    area_entity: ${marker.areaEntity}`] : []),
+              ...(marker.floorEntity ? [`    floor_entity: ${marker.floorEntity}`] : []),
+              ...(marker.activeStates.length ? [`    active_states: ${JSON.stringify(marker.activeStates)}`] : []),
               ...(marker.lightIntensity !== "" ? [`    light_intensity: ${marker.lightIntensity}`] : []),
               ...(marker.lightType ? [`    light_type: ${this._threeLightTypeName(marker.lightType)}`, `    light_radius: ${marker.lightRadius || 1.5}`] : []),
               ...(marker.lightPreset ? [`    light_preset: ${marker.lightPreset}`] : []),
@@ -6113,6 +6241,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           tapAction: this._exportMarkerAction(row, marker, "tap"),
           holdAction: this._exportMarkerAction(row, marker, "hold"),
           navigationPath: this._normalizeNavigationPath(marker.navigationPath || marker.navigation_path),
+          areaEntity: this._normalizeEntityId(marker.areaEntity || marker.area_entity),
+          floorEntity: this._normalizeEntityId(marker.floorEntity || marker.floor_entity),
+          activeStates: this._normalizeViewNames(marker.activeStates || marker.active_states),
           lightIntensity: row?.primaryDomain === "light" || hasCustomLightIntensity ? this._normalizeLightIntensity(marker.lightIntensity) : "",
           lightType: this._normalizeLightType(marker.lightType),
           lightRadius: this._normalizeLightRadius(marker.lightRadius),
@@ -6901,6 +7032,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (!markerLayer) return [];
     markerLayer.innerHTML = "";
     const markerButtons = this._modelMarkerRows().flatMap(({ row, marker }) => {
+      if (this._isMarkerOnOtherFloor(marker)) return [];
       const hidden = this._isMarkerFilteredOut(row, { views: true });
       if (hidden && this._mode !== "edit") return [];
       const button = document.createElement("button");
@@ -6930,9 +7062,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       `;
       this._attachMarkerPressActions(button, row);
       markerLayer.appendChild(button);
+      const position = this._markerAreaPoint(row, marker) || marker;
       const buttons = [{
         button,
-        position: new THREE.Vector3(marker.x, marker.y, marker.z),
+        position: new THREE.Vector3(position.x, position.y, position.z),
       }];
       if (this._mode === "edit" && row.primaryDomain === "light" && (this._normalizeLightType(marker.lightType) || "spot") === "spot") {
         (marker.subSpots || []).forEach((subSpot, index) => {
@@ -8952,6 +9085,15 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._saveMarkers();
   }
 
+  _updateMarkerAreaPosition(key, property, value) {
+    if (!this._markers[key]) return;
+    if (JSON.stringify(this._markers[key][property] ?? (property === "activeStates" ? [] : "")) === JSON.stringify(value)) return;
+    this._pushMarkerHistory();
+    this._markers[key][property] = value;
+    this._saveMarkers();
+    this._refreshSelectedMarkerPanel();
+  }
+
   _updateMarkerIcon(key, value) {
     if (!this._markers[key]) return;
     const icon = String(value || "").trim();
@@ -9350,6 +9492,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       tapAction: existingMarker?.tapAction || "",
       holdAction: existingMarker?.holdAction || "",
       navigationPath: existingMarker?.navigationPath || "",
+      areaEntity: existingMarker?.areaEntity || "",
+      floorEntity: existingMarker?.floorEntity || "",
+      activeStates: existingMarker?.activeStates || [],
       colorThresholds: this._normalizeColorThresholds(existingMarker?.colorThresholds || existingMarker?.color_thresholds),
       lightIntensity: this._normalizeLightIntensity(existingMarker?.lightIntensity),
       lightType: this._normalizeLightType(existingMarker?.lightType),
