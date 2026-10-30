@@ -116,6 +116,8 @@ entity is in one of its `active_states` (default `cleaning`), the marker moves t
 centre of the brightness area whose name matches the sensor state. Case, spaces,
 `_` and `-` are ignored, so `woon_kamer` matches an area named **Woon Kamer**.
 Otherwise the marker stays at its own position, for example on the dock.
+While active, the marker and that area light up in the domain's active color
+(`--state-vacuum-active-color` for a vacuum): the area gets a faint fill and a glowing edge.
 
 ```yaml
 markers:

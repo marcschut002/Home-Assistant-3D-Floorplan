@@ -698,8 +698,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _entityStateKind(row) {
     const state = String(row.primaryState || "").toLowerCase();
-    const activeStates = ["on", "open", "opening", "unlocked", "detected", "motion", "home", "playing", "heat", "cool", "heating", "cooling", "active", "running"];
-    const inactiveStates = ["off", "closed", "closing", "locked", "clear", "none", "not_home", "idle", "standby", "paused", "stopped"];
+    const activeStates = ["on", "open", "opening", "unlocked", "detected", "motion", "home", "playing", "heat", "cool", "heating", "cooling", "active", "running", "cleaning", "returning"];
+    const inactiveStates = ["off", "closed", "closing", "locked", "clear", "none", "not_home", "idle", "standby", "paused", "stopped", "docked"];
 
     if (activeStates.includes(state)) return "active";
     if (inactiveStates.includes(state)) return "inactive";
@@ -714,8 +714,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (row.offline || this._config.show_entity_state || this._entityStateKind(row) !== "active") return "";
     const rgb = row.rgbColor;
     if (rgb?.every(Number.isFinite)) return `rgb(${rgb.join(", ")})`;
-    const domain = /^[a-z0-9_]+$/.test(row.primaryDomain || "") ? row.primaryDomain : "";
-    return `var(--state-${domain}-active-color, var(--state-active-color, #ffc107))`;
+    return this._markerAreaActiveColor(row);
   }
 
   /**
@@ -4725,10 +4724,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return Boolean(floor) && floor.id !== this._activeFloorId;
   }
 
-  // area_entity: while the marker's entity is in one of its active_states (default
-  // "cleaning"), the marker moves to the centre of the area named by that sensor's
-  // state. Otherwise, and in Edit Mode, it stays at its own (dock) position.
-  _markerAreaPoint(row, marker) {
+  // The area the marker's area_entity names while the entity is in one of its
+  // active_states (default "cleaning"). Never in Edit Mode.
+  _markerActiveZone(row, marker) {
     if (this._mode === "edit" || !marker?.areaEntity) return null;
     const activeStates = marker.activeStates?.length ? marker.activeStates : ["cleaning"];
     const state = String(this._hass?.states?.[row.entityId]?.state ?? "").toLowerCase();
@@ -4736,7 +4734,44 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const areaName = this._hass?.states?.[marker.areaEntity]?.state;
     if (!areaName || ["unknown", "unavailable"].includes(areaName)) return null;
     const slug = this._stateSlug(areaName);
-    const zone = Object.values(this._zones || {}).find((item) => this._stateSlug(item.id) === slug || this._stateSlug(item.name) === slug);
+    return Object.values(this._zones || {}).find((item) => this._stateSlug(item.id) === slug || this._stateSlug(item.name) === slug) || null;
+  }
+
+  // Areas with an active area_entity marker in them, highlighted in that marker's
+  // active color. Hidden markers (other floor, layer, view) highlight nothing.
+  _activeAreaHighlights() {
+    if (this._mode === "edit") return [];
+    return this._modelMarkerRows().flatMap(({ row, marker }) => {
+      if (this._isMarkerOnOtherFloor(marker) || this._isMarkerFilteredOut(row, { views: true })) return [];
+      const zone = this._markerActiveZone(row, marker);
+      if (!zone || (zone.points || []).length < 3) return [];
+      return [{ zoneId: zone.id, color: this._resolveCssColor(this._markerAreaActiveColor(row)) }];
+    });
+  }
+
+  _markerAreaActiveColor(row) {
+    const domain = /^[a-z0-9_]+$/.test(row.primaryDomain || "") ? row.primaryDomain : "";
+    return `var(--state-${domain}-active-color, var(--state-active-color, #ffc107))`;
+  }
+
+  // Three.js needs a concrete color; let the browser resolve theme variables.
+  _resolveCssColor(value, fallback = "#ffc107") {
+    const host = this.shadowRoot || document.body;
+    if (!host) return fallback;
+    const probe = document.createElement("span");
+    probe.style.color = fallback;
+    probe.style.color = value;
+    host.appendChild(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color || fallback;
+  }
+
+  // area_entity: while the marker's entity is in one of its active_states (default
+  // "cleaning"), the marker moves to the centre of the area named by that sensor's
+  // state. Otherwise, and in Edit Mode, it stays at its own (dock) position.
+  _markerAreaPoint(row, marker) {
+    const zone = this._markerActiveZone(row, marker);
     const centre = zone ? this._zoneCentre(zone) : null;
     if (!centre) return null;
     // Keep the marker's own height; only the floor position follows the area.
@@ -7051,10 +7086,17 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       button.style.setProperty("--marker-size", `${this._display.markerSize}px`);
       button.style.setProperty("--marker-default-color", this._defaultMarkerColor());
       if (thresholdColor) button.style.setProperty("--marker-threshold-color", thresholdColor);
-      const activeIconColor = thresholdColor ? "" : this._markerActiveIconColor(row);
+      // In an area_entity area the marker glows like the highlighted area, also for
+      // custom active_states and with state colors on.
+      const areaActive = Boolean(this._markerActiveZone(row, marker));
+      const activeIconColor = thresholdColor ? "" : this._markerActiveIconColor(row) || (areaActive && !this._config.show_entity_state ? this._markerAreaActiveColor(row) : "");
       if (activeIconColor) {
         button.classList.add("state-on");
         button.style.setProperty("--marker-active-icon-color", activeIconColor);
+      }
+      if (areaActive) {
+        button.classList.add("area-active");
+        button.style.setProperty("--marker-area-color", this._markerAreaActiveColor(row));
       }
       button.innerHTML = `
         <span class="${content.type === "value" ? "value-face" : ""}">${content.type === "value" ? this._escape(content.value) : `<ha-icon icon="${this._escape(content.icon)}"></ha-icon>`}</span>
@@ -7366,6 +7408,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ambientState,
       zones: zoneData,
       lights: lightData,
+      areaHighlights: this._activeAreaHighlights(),
     });
   }
 
@@ -7461,9 +7504,79 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         if (outline) zoneGroup.add(outline);
       }
     }
+    for (const highlight of this._activeAreaHighlights()) {
+      const zone = this._zones?.[highlight.zoneId];
+      if (!zone) continue;
+      this._zoneHighlightMeshes(THREE, zone, highlight.color).forEach((mesh) => zoneGroup.add(mesh));
+    }
     this._refresh3DZoneLabels();
     this._refresh3DZonePointOverlay();
     this._requestRender();
+  }
+
+  // Active area: a faint fill, a crisp edge and a glow that fades in from the edge.
+  _zoneHighlightMeshes(THREE, zone, color) {
+    const fill = this._zoneMesh(THREE, zone, 0.14, color, { renderOrder: 2.3, floorLift: 0.07, surfaceSnap: false });
+    const edge = this._zoneEdgeBandMesh(THREE, zone, color, 0.025, 1, 1);
+    const glow = this._zoneEdgeBandMesh(THREE, zone, color, 0.16, 0.75, 0);
+    return [fill, glow, edge].filter(Boolean);
+  }
+
+  // A band along the inside of the zone outline, `widthRatio` of the zone's smallest
+  // extent wide, fading from `outerAlpha` at the outline to `innerAlpha` inside.
+  _zoneEdgeBandMesh(THREE, zone, color, widthRatio, outerAlpha, innerAlpha) {
+    const [firstAxis, secondAxis] = this._floorAxes();
+    const outer = this._offsetZonePoints(zone.points || [], 0.075, this._zoneFloorLevel(zone)).map((point) => this._modelToDisplayPoint(point));
+    if (outer.length < 3) return null;
+    const xs = outer.map((point) => Number(point[firstAxis]));
+    const ys = outer.map((point) => Number(point[secondAxis]));
+    const width = widthRatio * Math.min(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+    if (!(width > 0)) return null;
+    const signedArea = outer.reduce((sum, point, index) => {
+      const next = outer[(index + 1) % outer.length];
+      return sum + point[firstAxis] * next[secondAxis] - next[firstAxis] * point[secondAxis];
+    }, 0);
+    const orientation = signedArea >= 0 ? 1 : -1;
+    const inwardNormal = (from, to) => {
+      const dx = to[firstAxis] - from[firstAxis];
+      const dy = to[secondAxis] - from[secondAxis];
+      const length = Math.hypot(dx, dy) || 1;
+      return [(-dy / length) * orientation, (dx / length) * orientation];
+    };
+    // Miter-offset each vertex inwards so the band keeps an even width along each wall.
+    const inner = outer.map((point, index) => {
+      const previous = outer[(index - 1 + outer.length) % outer.length];
+      const next = outer[(index + 1) % outer.length];
+      const [n1x, n1y] = inwardNormal(previous, point);
+      const [n2x, n2y] = inwardNormal(point, next);
+      const mx = n1x + n2x;
+      const my = n1y + n2y;
+      const mLength = Math.hypot(mx, my) || 1;
+      const scale = width / Math.max(0.35, (mx / mLength) * n1x + (my / mLength) * n1y);
+      return { ...point, [firstAxis]: point[firstAxis] + (mx / mLength) * scale, [secondAxis]: point[secondAxis] + (my / mLength) * scale };
+    });
+    const modelPoints = [...outer, ...inner].map((point) => this._displayToModelPoint(point));
+    const count = outer.length;
+    const indices = [];
+    for (let index = 0; index < count; index += 1) {
+      const next = (index + 1) % count;
+      indices.push(index, next, count + next, index, count + next, count + index);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(modelPoints.flatMap((point) => [Number(point.x), Number(point.y), Number(point.z)]), 3));
+    const rgb = new THREE.Color(color);
+    const colors = [...outer.map(() => outerAlpha), ...inner.map(() => innerAlpha)].flatMap((alpha) => [rgb.r, rgb.g, rgb.b, alpha]);
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 4));
+    geometry.setIndex(indices);
+    const material = new THREE.MeshBasicMaterial({
+      vertexColors: true,
+      transparent: true,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.renderOrder = 2.4;
+    return mesh;
   }
 
   _zoneMesh(THREE, zone, opacity, color = zone.color || "#f8d66d", options = {}) {
@@ -11849,6 +11962,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           color: var(--marker-active-icon-color);
         }
 
+        .model-marker.area-active span {
+          box-shadow: 0 0 0 2px var(--marker-area-color), 0 0 16px var(--marker-area-color);
+        }
+
         .layer-switcher {
           position: absolute;
           left: 12px;
@@ -13561,7 +13678,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       button.addEventListener("click", () => this._removeFloor(Number(button.dataset.floorRemove)));
     });
     this.querySelector("[data-floor-add]")?.addEventListener("click", () => this._addFloor());
-    this.querySelectorAll("[data-floor-field]").forEach((input) => {
+    this.querySelectorAll("[data-floor-field]:not(ha-icon-picker)").forEach((input) => {
       input.addEventListener("change", (event) => this._handleFloorInput(event.currentTarget));
     });
     this.querySelectorAll("[data-open-layout-editor]").forEach((button) => {
@@ -13582,7 +13699,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       button.addEventListener("click", () => this._removeLayer(Number(button.dataset.layerRemove)));
     });
     this.querySelector("[data-layer-add]")?.addEventListener("click", () => this._addLayer());
-    this.querySelectorAll("[data-layer-field]").forEach((input) => {
+    this.querySelectorAll("[data-layer-field]:not(ha-icon-picker)").forEach((input) => {
       input.addEventListener("change", (event) => this._handleLayerInput(event.currentTarget));
     });
     this.querySelectorAll("[data-config-key]").forEach((element) => {
