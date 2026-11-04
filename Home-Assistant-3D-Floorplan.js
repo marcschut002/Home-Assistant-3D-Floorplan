@@ -4857,6 +4857,14 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   // layer_entities: { layer_id: entity_id } — the sensor a marker shows while that layer is active.
   _normalizeLayerEntities(value) {
+    // Older layout exports reached the config as a JSON string ('{"energy":"sensor.x"}').
+    if (typeof value === "string") {
+      try {
+        value = JSON.parse(value);
+      } catch {
+        return {};
+      }
+    }
     if (!value || typeof value !== "object" || Array.isArray(value)) return {};
     return Object.entries(value).reduce((result, [layerId, entityId]) => {
       const id = this._layerSlug(layerId);
@@ -6189,7 +6197,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
                     ...(marker.visibleInViews.length ? [`        visible_in_views: ${JSON.stringify(marker.visibleInViews)}`] : []),
                     ...(marker.layers.length ? [`        layers: ${JSON.stringify(marker.layers)}`] : []),
                     ...(marker.excludedLayers.length ? [`        exclude_layers: ${JSON.stringify(marker.excludedLayers)}`] : []),
-                    ...(Object.keys(marker.layerEntities).length ? [`        layer_entities: ${JSON.stringify(marker.layerEntities)}`] : []),
+                    ...this._yamlLayerEntityLines(marker.layerEntities, "        "),
                     `        tap_action: ${marker.tapAction}`,
                     `        hold_action: ${marker.holdAction}`,
                     ...(marker.navigationPath ? [`        navigation_path: ${JSON.stringify(marker.navigationPath)}`] : []),
@@ -6268,7 +6276,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               ...(marker.visibleInViews.length ? [`    visible_in_views: ${JSON.stringify(marker.visibleInViews)}`] : []),
               ...(marker.layers.length ? [`    layers: ${JSON.stringify(marker.layers)}`] : []),
               ...(marker.excludedLayers.length ? [`    exclude_layers: ${JSON.stringify(marker.excludedLayers)}`] : []),
-              ...(Object.keys(marker.layerEntities).length ? [`    layer_entities: ${JSON.stringify(marker.layerEntities)}`] : []),
+              ...this._yamlLayerEntityLines(marker.layerEntities, "    "),
               `    tap_action: ${marker.tapAction}`,
               `    hold_action: ${marker.holdAction}`,
               ...(marker.navigationPath ? [`    navigation_path: ${JSON.stringify(marker.navigationPath)}`] : []),
@@ -6396,6 +6404,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         ...(view.icon_on_model === false ? [`${indent}    icon_on_model: false`] : []),
       ]),
     ];
+  }
+
+  // A nested block, not inline {...}: the card editor's YAML reader keeps inline maps as text.
+  _yamlLayerEntityLines(layerEntities, indent) {
+    const entries = Object.entries(layerEntities || {});
+    if (!entries.length) return [];
+    return [`${indent}layer_entities:`, ...entries.map(([layerId, entityId]) => `${indent}  ${layerId}: ${entityId}`)];
   }
 
   _yamlMarkersForFloor(floorId, rowByKey) {

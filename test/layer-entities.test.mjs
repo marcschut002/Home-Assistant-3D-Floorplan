@@ -100,6 +100,22 @@ test("layer_entities is read from YAML markers", () => {
   assert.deepEqual(markers["binary_sensor.hall_motion"].layerEntities, { climate: "sensor.hall_temperature" });
 });
 
+test("layer_entities saved as a JSON string by older exports still works", () => {
+  const card = makeCard();
+  assert.deepEqual(card._normalizeLayerEntities('{"energy":"sensor.aanrecht_power"}'), { energy: "sensor.aanrecht_power" });
+  assert.deepEqual(card._normalizeLayerEntities("not json"), {});
+});
+
+test("layer_entities is exported as a nested block that the editor's YAML reader understands", () => {
+  const card = makeCard();
+  const lines = card._yamlLayerEntityLines({ energy: "sensor.aanrecht_power", klimaat: "sensor.temp" }, "    ");
+  assert.deepEqual(lines, ["    layer_entities:", "      energy: sensor.aanrecht_power", "      klimaat: sensor.temp"]);
+  const Editor = defined.get("home-assistant-3d-floorplan-editor");
+  const editor = Object.create(Editor.prototype);
+  const parsed = editor._parseFullYaml(["markers:", "  - entity: light.aanrecht", ...lines].join("\n"));
+  assert.deepEqual(parsed.markers[0].layer_entities, { energy: "sensor.aanrecht_power", klimaat: "sensor.temp" });
+});
+
 // ------------------------------------------------------------------ display
 test("All shows the primary sensor", () => {
   const card = makeCard(placed("binary_sensor.hall_motion", { layerEntities: { climate: "sensor.hall_temperature" } }));
