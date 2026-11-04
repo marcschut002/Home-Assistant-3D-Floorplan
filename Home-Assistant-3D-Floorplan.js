@@ -654,6 +654,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         key: entityId,
         entityId,
         name,
+        deviceId: entity?.device_id || "",
         deviceName,
         offline: isOffline,
         domain,
@@ -758,7 +759,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _markerIcon(row) {
-    const markerIcon = this._markers[row.key]?.icon;
+    const markerIcon = !row.layerEntityOf && this._markers[row.key]?.icon;
     if (markerIcon) return markerIcon;
     return this._defaultIcon(row);
   }
@@ -930,6 +931,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         visibleInViews: this._normalizeViewNames(marker.visible_in_views || marker.visibleInViews),
         layers: this._normalizeViewNames(marker.layers),
         excludedLayers: this._normalizeViewNames(marker.exclude_layers || marker.excludedLayers),
+        layerEntities: this._normalizeLayerEntities(marker.layer_entities || marker.layerEntities),
         tapAction: this._normalizeMarkerAction(marker.tap_action || marker.tapAction, "tap"),
         holdAction: this._normalizeMarkerAction(marker.hold_action || marker.holdAction, "hold"),
         navigationPath: this._normalizeNavigationPath(marker.navigation_path || marker.navigationPath),
@@ -975,6 +977,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         visibleInViews: this._normalizeViewNames(marker.visibleInViews || marker.visible_in_views),
         layers: this._normalizeViewNames(marker.layers),
         excludedLayers: this._normalizeViewNames(marker.exclude_layers || marker.excludedLayers),
+        layerEntities: this._normalizeLayerEntities(marker.layerEntities || marker.layer_entities),
         tapAction: this._normalizeMarkerAction(marker.tapAction || marker.tap_action, "tap"),
         holdAction: this._normalizeMarkerAction(marker.holdAction || marker.hold_action, "hold"),
         navigationPath: this._normalizeNavigationPath(marker.navigationPath || marker.navigation_path),
@@ -3970,9 +3973,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _markerListRows(rows) {
     const filtered = this._filteredRows(rows);
     const showSystem = this._showAllEntityTypes || this._filters.domain !== "all";
+    const usedLayerEntities = this._usedLayerEntityIds();
     return {
       placed: filtered.filter((row) => this._markers[row.key] && this._rowMatchesLayerFilter(row, true)),
-      add: filtered.filter((row) => !this._markers[row.key] && (showSystem || !this._isSystemEntityRow(row)) && this._rowMatchesLayerFilter(row, false)),
+      add: filtered.filter((row) => !this._markers[row.key] && !usedLayerEntities.has(row.entityId) && (showSystem || !this._isSystemEntityRow(row)) && this._rowMatchesLayerFilter(row, false)),
     };
   }
 
@@ -3980,7 +3984,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     return JSON.stringify([
       this._activeFloorId,
       this._activeLayer,
-      Object.entries(this._markers).map(([key, marker]) => [key, marker.layers || [], marker.excludedLayers || [], marker.markerDisplay || "", marker.visibleInViews || []]),
+      Object.entries(this._markers).map(([key, marker]) => [key, marker.layers || [], marker.excludedLayers || [], marker.layerEntities || {}, marker.markerDisplay || "", marker.visibleInViews || []]),
     ]);
   }
 
@@ -4691,7 +4695,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const override = this._normalizeMarkerDisplay(marker.markerDisplay);
     const layer = this._activeLayer && this._isMarkerInLayer(row, this._activeLayer) ? this._layerById(this._activeLayer) : null;
     if (layer?.markerDisplay) return layer.markerDisplay;
-    if (override && !(layer && override === "hide")) return override;
+    if (override && !row.layerEntityOf && !(layer && override === "hide")) return override;
     if (row?.primaryDomain === "sensor" && ["temperature", "humidity"].includes(row.primaryDeviceClass)) return "value";
     return "icon";
   }
@@ -4851,12 +4855,44 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       || row.deviceClasses.some((deviceClass) => layer.deviceClasses.includes(deviceClass));
   }
 
+  // layer_entities: { layer_id: entity_id } — the sensor a marker shows while that layer is active.
+  _normalizeLayerEntities(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.entries(value).reduce((result, [layerId, entityId]) => {
+      const id = this._layerSlug(layerId);
+      const entity = this._normalizeEntityId(entityId);
+      if (id && entity) result[id] = entity;
+      return result;
+    }, {});
+  }
+
   _isMarkerInLayer(row, layerId) {
+    const layer = this._layerById(layerId);
+    if (!layer) return false;
+    return Boolean(this._markers[row?.key]?.layerEntities?.[layer.id]) || this._isPrimaryInLayer(row, layer.id);
+  }
+
+  // Whether the marker's own (primary) entity belongs to the layer, leaving layer_entities aside.
+  _isPrimaryInLayer(row, layerId) {
     const layer = this._layerById(layerId);
     if (!layer) return false;
     const marker = this._markers[row?.key] || {};
     if ((marker.excludedLayers || []).some((id) => this._layerSlug(id) === layer.id)) return false;
     return this._layerMatchesRow(layer, row) || (marker.layers || []).some((id) => this._layerSlug(id) === layer.id);
+  }
+
+  // With a layer active, a marker with a layer_entities sensor for it shows that
+  // sensor in its place. The row keeps the marker's key, so position, selection
+  // and dragging stay the marker's own; layerEntityOf names the primary entity.
+  _markerDisplayRow(row, rowByKey) {
+    const entityId = this._markers[row?.key]?.layerEntities?.[this._activeLayer];
+    const layerRow = entityId && entityId !== row.entityId ? rowByKey.get(entityId) : null;
+    return layerRow ? { ...layerRow, key: row.key, layerEntityOf: row.entityId } : row;
+  }
+
+  // Entities a placed marker on this floor already shows for a layer.
+  _usedLayerEntityIds() {
+    return new Set(Object.values(this._markers).flatMap((marker) => Object.values(marker.layerEntities || {})));
   }
 
   // A selected layer decides on its own which markers show; "All" falls back to
@@ -5166,7 +5202,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (this._mode === "edit") {
       return this._normalizeMarkerAction(type === "tap" ? this._config.edit_marker_tap_action : this._config.edit_marker_hold_action, "hold") || (type === "tap" ? "select" : "move");
     }
-    const override = this._normalizeMarkerAction(type === "tap" ? marker.tapAction : marker.holdAction, type);
+    const override = !row?.layerEntityOf && this._normalizeMarkerAction(type === "tap" ? marker.tapAction : marker.holdAction, type);
     if (override) return override;
     return this._normalizeMarkerAction(type === "tap" ? this._config.marker_tap_action : this._config.marker_hold_action, type) || this._defaultDomainAction(row, type);
   }
@@ -5190,6 +5226,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ? [
           ["appearance", "Appearance", this._appearanceSummary(row), `${this._iconSelect(row)}${this._markerDisplayEditor(row)}${this._colorThresholdEditor(row)}`],
           ["visibility", "Visibility", this._visibilitySummary(row), `${this._markerViewsEditor(row)}${this._markerLayersEditor(row)}`],
+          ["layer-entities", "Sensor per layer", this._layerEntitiesSummary(row), this._markerLayerEntitiesEditor(row)],
           ["actions", "Actions", this._actionsSummary(row), this._actionEditor(row)],
           ["area-position", "Area position", [marker.areaEntity, marker.floorEntity].filter(Boolean).join(" · ") || "Off", this._areaPositionEditor(row)],
           ["light","Light", this._lightSummary(row), this._lightIntensityEditor(row)],
@@ -5380,6 +5417,37 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       element.addEventListener("pointerdown", (event) => event.stopPropagation());
       element.addEventListener("change", (event) => {
         this._updateMarkerDisplay(event.currentTarget.dataset.markerDisplay, event.currentTarget.value);
+      });
+    });
+
+    rowElement.querySelectorAll("[data-layer-entity]").forEach((element) => {
+      element.addEventListener("pointerdown", (event) => event.stopPropagation());
+      element.addEventListener("change", (event) => {
+        const { layerEntity, layerId } = event.currentTarget.dataset;
+        this._setLayerEntity(layerEntity, layerId, event.currentTarget.value);
+      });
+    });
+
+    rowElement.querySelectorAll("[data-layer-entities-autofill]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this._autofillLayerEntities(event.currentTarget.dataset.layerEntitiesAutofill);
+      });
+    });
+
+    rowElement.querySelectorAll("[data-layer-entity-primary]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const { layerEntityPrimary, layerId } = event.currentTarget.dataset;
+        this._makeLayerEntityPrimary(layerEntityPrimary, layerId);
+      });
+    });
+
+    rowElement.querySelectorAll("[data-merge-marker]").forEach((element) => {
+      element.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const { mergeMarker, mergeFrom } = event.currentTarget.dataset;
+        this._mergeMarkerInto(mergeMarker, mergeFrom);
       });
     });
 
@@ -5912,6 +5980,77 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     `;
   }
 
+  // Other sensors of the marker's device, for its layer_entities pickers.
+  _layerEntityCandidates(row, rows = this._deviceRows()) {
+    if (!row?.deviceId) return [];
+    return rows.filter((item) => item.deviceId === row.deviceId && item.entityId !== row.entityId);
+  }
+
+  _layerEntitiesSummary(row) {
+    const count = Object.keys(this._markers[row.key]?.layerEntities || {}).filter((id) => this._layerById(id)).length;
+    return count ? `${count} layer${count === 1 ? "" : "s"}` : "Primary only";
+  }
+
+  _markerLayerEntitiesEditor(row) {
+    if (!this._layers.length) return "";
+    const rows = this._deviceRows();
+    const rowByKey = new Map(rows.map((item) => [item.key, item]));
+    const candidates = this._layerEntityCandidates(row, rows);
+    const layerEntities = this._markers[row.key]?.layerEntities || {};
+    if (!candidates.length && !Object.keys(layerEntities).length) return "";
+    const key = this._escape(row.key);
+    const optionLabel = (item) => `${item.name}${this._markers[item.key] ? " (own marker)" : ""}`;
+    const layerRows = this._layers
+      .map((layer) => {
+        const selected = layerEntities[layer.id] || "";
+        const matching = candidates.filter((item) => this._layerMatchesRow(layer, item));
+        const others = candidates.filter((item) => !this._layerMatchesRow(layer, item));
+        const option = (item) => `<option value="${this._escape(item.entityId)}" ${item.entityId === selected ? "selected" : ""}>${this._escape(optionLabel(item))}</option>`;
+        const foreign = selected && !candidates.some((item) => item.entityId === selected)
+          ? `<option value="${this._escape(selected)}" selected>${this._escape(rowByKey.get(selected)?.name || selected)}</option>`
+          : "";
+        const canMakePrimary = selected && row.primaryDomain !== "light" && rowByKey.has(selected) && !this._markers[selected];
+        return `
+        <div class="layer-entity-row">
+          <span>${this._escape(layer.name)}</span>
+          <select data-layer-entity="${key}" data-layer-id="${this._escape(layer.id)}" aria-label="${this._escape(`Sensor for ${layer.name}`)}">
+            <option value="">${this._isPrimaryInLayer(row, layer.id) ? "Primary sensor" : "Not in layer"}</option>
+            ${foreign}
+            ${matching.length ? `<optgroup label="Matches ${this._escape(layer.name)}">${matching.map(option).join("")}</optgroup>` : ""}
+            ${others.length ? `<optgroup label="Same device">${others.map(option).join("")}</optgroup>` : ""}
+          </select>
+          ${canMakePrimary
+            ? `<button type="button" class="panel-icon-button" data-layer-entity-primary="${key}" data-layer-id="${this._escape(layer.id)}" title="Make this the primary sensor (shown in All)" aria-label="Make primary"><ha-icon icon="mdi:star-outline"></ha-icon></button>`
+            : `<span></span>`}
+        </div>
+      `;
+      })
+      .join("");
+    const mergeable = candidates.filter((item) => this._markers[item.key]);
+    const mergeRows = mergeable
+      .map((item) => {
+        const layers = this._mergeLayersFor(row, item);
+        return `
+        <div class="layer-entity-row">
+          <span>${this._escape(item.name)}</span>
+          <small>${this._escape(layers.length ? layers.map((id) => this._layerById(id)?.name || id).join(", ") : "No free layer")}</small>
+          <button type="button" class="panel-icon-button" data-merge-marker="${key}" data-merge-from="${this._escape(item.key)}" ${layers.length ? "" : "disabled"} title="Merge into this marker and remove its own marker" aria-label="Merge"><ha-icon icon="mdi:call-merge"></ha-icon></button>
+        </div>
+      `;
+      })
+      .join("");
+    return `
+      <div class="marker-layer-entities">
+        <div class="color-threshold-header">
+          <span>Shown while a layer is active <small>(All shows the primary)</small></span>
+          <button type="button" data-layer-entities-autofill="${key}" title="Pick a matching sensor of this device for every empty layer">Auto-fill</button>
+        </div>
+        ${layerRows}
+        ${mergeRows ? `<div class="layer-entity-merge"><span>Placed separately on this floor</span>${mergeRows}</div>` : ""}
+      </div>
+    `;
+  }
+
   _colorThresholdEditor(row) {
     const marker = this._markers[row.key] || {};
     const thresholds = this._normalizeColorThresholds(marker.colorThresholds || marker.color_thresholds) || [];
@@ -6050,6 +6189,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
                     ...(marker.visibleInViews.length ? [`        visible_in_views: ${JSON.stringify(marker.visibleInViews)}`] : []),
                     ...(marker.layers.length ? [`        layers: ${JSON.stringify(marker.layers)}`] : []),
                     ...(marker.excludedLayers.length ? [`        exclude_layers: ${JSON.stringify(marker.excludedLayers)}`] : []),
+                    ...(Object.keys(marker.layerEntities).length ? [`        layer_entities: ${JSON.stringify(marker.layerEntities)}`] : []),
                     `        tap_action: ${marker.tapAction}`,
                     `        hold_action: ${marker.holdAction}`,
                     ...(marker.navigationPath ? [`        navigation_path: ${JSON.stringify(marker.navigationPath)}`] : []),
@@ -6128,6 +6268,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               ...(marker.visibleInViews.length ? [`    visible_in_views: ${JSON.stringify(marker.visibleInViews)}`] : []),
               ...(marker.layers.length ? [`    layers: ${JSON.stringify(marker.layers)}`] : []),
               ...(marker.excludedLayers.length ? [`    exclude_layers: ${JSON.stringify(marker.excludedLayers)}`] : []),
+              ...(Object.keys(marker.layerEntities).length ? [`    layer_entities: ${JSON.stringify(marker.layerEntities)}`] : []),
               `    tap_action: ${marker.tapAction}`,
               `    hold_action: ${marker.holdAction}`,
               ...(marker.navigationPath ? [`    navigation_path: ${JSON.stringify(marker.navigationPath)}`] : []),
@@ -6273,6 +6414,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           visibleInViews: this._normalizeViewNames(marker.visibleInViews || marker.visible_in_views),
           layers: this._normalizeViewNames(marker.layers),
           excludedLayers: this._normalizeViewNames(marker.excludedLayers || marker.exclude_layers),
+          layerEntities: this._normalizeLayerEntities(marker.layerEntities || marker.layer_entities),
           tapAction: this._exportMarkerAction(row, marker, "tap"),
           holdAction: this._exportMarkerAction(row, marker, "hold"),
           navigationPath: this._normalizeNavigationPath(marker.navigationPath || marker.navigation_path),
@@ -7058,7 +7200,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         const y = Number(marker.y);
         const z = Number(marker.z);
         if (!row || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
-        return { row, marker: { ...marker, x, y, z } };
+        return { row, shown: this._markerDisplayRow(row, rowByKey), marker: { ...marker, x, y, z } };
       })
       .filter(Boolean);
   }
@@ -7066,30 +7208,31 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _build3DMarkerButtons(markerLayer, THREE, camera) {
     if (!markerLayer) return [];
     markerLayer.innerHTML = "";
-    const markerButtons = this._modelMarkerRows().flatMap(({ row, marker }) => {
+    const markerButtons = this._modelMarkerRows().flatMap(({ row, shown, marker }) => {
       if (this._isMarkerOnOtherFloor(marker)) return [];
       const hidden = this._isMarkerFilteredOut(row, { views: true });
       if (hidden && this._mode !== "edit") return [];
       const button = document.createElement("button");
       button.type = "button";
-      const stateClass = this._stateClass(row);
-      const content = this._markerFace(row);
-      const thresholds = marker?.colorThresholds;
-      const numericState = Number(row.primaryState);
-      const thresholdColor = (!row.offline && thresholds && Number.isFinite(numericState))
+      const stateClass = this._stateClass(shown);
+      const content = this._markerFace(shown);
+      // Color thresholds belong to the primary entity, not to a layer sensor.
+      const thresholds = shown.layerEntityOf ? null : marker?.colorThresholds;
+      const numericState = Number(shown.primaryState);
+      const thresholdColor = (!shown.offline && thresholds && Number.isFinite(numericState))
         ? this._markerColorFromThresholds(thresholds, numericState)
         : null;
-      button.className = `model-marker ${this._display.showLabels ? "with-label" : "icon-only"} ${content.type === "value" ? "value-marker" : ""} ${hidden ? "marker-hidden" : ""} ${stateClass} ${thresholdColor ? "state-threshold" : ""} ${row.offline ? "offline" : "online"}`;
+      button.className = `model-marker ${this._display.showLabels ? "with-label" : "icon-only"} ${content.type === "value" ? "value-marker" : ""} ${hidden ? "marker-hidden" : ""} ${stateClass} ${thresholdColor ? "state-threshold" : ""} ${shown.offline ? "offline" : "online"}`;
       button.dataset.marker = row.key;
-      button.dataset.entity = row.entityId;
-      button.title = `${row.name} - ${row.primaryState}`;
+      button.dataset.entity = shown.entityId;
+      button.title = `${shown.name} - ${shown.primaryState}`;
       button.style.setProperty("--marker-size", `${this._display.markerSize}px`);
       button.style.setProperty("--marker-default-color", this._defaultMarkerColor());
       if (thresholdColor) button.style.setProperty("--marker-threshold-color", thresholdColor);
       // In an area_entity area the marker glows like the highlighted area, also for
       // custom active_states and with state colors on.
       const areaActive = Boolean(this._markerActiveZone(row, marker));
-      const activeIconColor = thresholdColor ? "" : this._markerActiveIconColor(row) || (areaActive && !this._config.show_entity_state ? this._markerAreaActiveColor(row) : "");
+      const activeIconColor = thresholdColor ? "" : this._markerActiveIconColor(shown) || (areaActive && !this._config.show_entity_state ? this._markerAreaActiveColor(row) : "");
       if (activeIconColor) {
         button.classList.add("state-on");
         button.style.setProperty("--marker-active-icon-color", activeIconColor);
@@ -7100,9 +7243,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       }
       button.innerHTML = `
         <span class="${content.type === "value" ? "value-face" : ""}">${content.type === "value" ? this._escape(content.value) : `<ha-icon icon="${this._escape(content.icon)}"></ha-icon>`}</span>
-        ${this._display.showLabels ? `<strong>${this._escape(row.name)}</strong>` : ""}
+        ${this._display.showLabels ? `<strong>${this._escape(shown.name)}</strong>` : ""}
       `;
-      this._attachMarkerPressActions(button, row);
+      this._attachMarkerPressActions(button, shown);
       markerLayer.appendChild(button);
       const position = this._markerAreaPoint(row, marker) || marker;
       const buttons = [{
@@ -9262,6 +9405,129 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (this._selectedMarkers.has(key)) this._refreshSelectedMarkerPanel();
   }
 
+  _setLayerEntity(key, layerId, entityId) {
+    const marker = this._markers[key];
+    const layer = this._layerById(layerId);
+    if (!marker || !layer) return;
+    const current = marker.layerEntities?.[layer.id] || "";
+    const next = this._normalizeEntityId(entityId);
+    if (current === next || next === marker.entityId) return;
+    this._pushMarkerHistory();
+    const layerEntities = { ...(marker.layerEntities || {}) };
+    if (next) layerEntities[layer.id] = next;
+    else delete layerEntities[layer.id];
+    marker.layerEntities = layerEntities;
+    // The sensor now shows on this marker, so its own marker would only duplicate it.
+    if (next && this._markers[next]) this._removeMergedMarker(next);
+    this._afterLayerEntitiesChange(key);
+  }
+
+  // For every layer without a sensor that the primary is not in itself, the first
+  // sensor of the same device that the layer matches (and that has no own marker).
+  _autofillLayerEntities(key) {
+    const marker = this._markers[key];
+    const row = this._deviceRows().find((item) => item.key === key);
+    if (!marker || !row) return;
+    const candidates = this._layerEntityCandidates(row).filter((item) => !this._markers[item.key]);
+    const layerEntities = { ...(marker.layerEntities || {}) };
+    let changed = false;
+    for (const layer of this._layers) {
+      if (layerEntities[layer.id] || this._isPrimaryInLayer(row, layer.id)) continue;
+      const match = candidates.find((item) => this._layerMatchesRow(layer, item));
+      if (!match) continue;
+      layerEntities[layer.id] = match.entityId;
+      changed = true;
+    }
+    if (!changed) return;
+    this._pushMarkerHistory();
+    marker.layerEntities = layerEntities;
+    this._afterLayerEntitiesChange(key);
+  }
+
+  // Layers a separately placed marker would fill on this marker: the ones it is in
+  // that have no sensor yet and that the primary is not in itself.
+  _mergeLayersFor(row, otherRow) {
+    const layerEntities = this._markers[row.key]?.layerEntities || {};
+    return this._layers
+      .filter((layer) => !layerEntities[layer.id] && !this._isPrimaryInLayer(row, layer.id) && this._isPrimaryInLayer(otherRow, layer.id))
+      .map((layer) => layer.id);
+  }
+
+  _mergeMarkerInto(key, otherKey) {
+    const marker = this._markers[key];
+    const rows = this._deviceRows();
+    const row = rows.find((item) => item.key === key);
+    const otherRow = rows.find((item) => item.key === otherKey);
+    if (!marker || !row || !otherRow || !this._markers[otherKey] || key === otherKey) return;
+    const layers = this._mergeLayersFor(row, otherRow);
+    if (!layers.length) return;
+    this._pushMarkerHistory();
+    marker.layerEntities = { ...(marker.layerEntities || {}), ...Object.fromEntries(layers.map((id) => [id, otherRow.entityId])) };
+    this._removeMergedMarker(otherKey);
+    this._afterLayerEntitiesChange(key);
+  }
+
+  _removeMergedMarker(key) {
+    delete this._markers[key];
+    this._selectedMarkers.delete(key);
+    if (this._pendingDeviceKey === key) this._pendingDeviceKey = null;
+  }
+
+  // Swaps a layer sensor with the primary entity. The marker is keyed by its primary
+  // entity, so it moves to the new key; the old primary keeps showing in its layers.
+  _makeLayerEntityPrimary(key, layerId) {
+    const marker = this._markers[key];
+    const layer = this._layerById(layerId);
+    const rows = this._deviceRows();
+    const row = rows.find((item) => item.key === key);
+    const entityId = layer && marker?.layerEntities?.[layer.id];
+    const newRow = entityId && rows.find((item) => item.key === entityId);
+    if (!row || !newRow || this._markers[entityId] || row.primaryDomain === "light") return;
+    const layerEntities = { ...marker.layerEntities };
+    delete layerEntities[layer.id];
+    for (const other of this._layers) {
+      if (!layerEntities[other.id] && this._isPrimaryInLayer(row, other.id) && !this._layerMatchesRow(other, newRow)) layerEntities[other.id] = row.entityId;
+    }
+    this._pushMarkerHistory();
+    const markers = {};
+    for (const [markerKey, value] of Object.entries(this._markers)) {
+      if (markerKey !== key) {
+        markers[markerKey] = value;
+        continue;
+      }
+      // Icon, thresholds and actions were set for the old primary, so they start over.
+      markers[entityId] = {
+        ...value,
+        key: entityId,
+        entityId,
+        name: newRow.name,
+        icon: "",
+        colorThresholds: null,
+        tapAction: "",
+        holdAction: "",
+        layers: [],
+        excludedLayers: [],
+        layerEntities,
+      };
+    }
+    this._markers = markers;
+    this._floorMarkers[this._activeFloorId] = markers;
+    this._selectedMarkers.clear();
+    this._selectedMarkers.add(entityId);
+    this._saveMarkers();
+    this._refresh3DMarkerOverlay();
+    this._refreshDeviceRow(key);
+    this._refreshDeviceRow(entityId);
+    this._refreshSelectedMarkerPanel();
+  }
+
+  _afterLayerEntitiesChange(key) {
+    this._saveMarkers();
+    this._refresh3DMarkerOverlay();
+    this._refreshDeviceRow(key);
+    if (this._selectedMarkers.has(key)) this._refreshSelectedMarkerPanel();
+  }
+
   _colorThresholdsForMarker(key) {
     const marker = this._markers[key];
     if (!marker) return [];
@@ -9602,6 +9868,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       visibleInViews: existingMarker?.visibleInViews || [],
       layers: existingMarker?.layers || this._layersForNewMarker(row),
       excludedLayers: existingMarker?.excludedLayers || [],
+      layerEntities: existingMarker?.layerEntities || {},
       tapAction: existingMarker?.tapAction || "",
       holdAction: existingMarker?.holdAction || "",
       navigationPath: existingMarker?.navigationPath || "",
@@ -10848,6 +11115,37 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           display: inline-flex;
           align-items: center;
           gap: 4px;
+        }
+
+        .marker-layer-entities,
+        .layer-entity-merge {
+          grid-column: 1 / 4;
+          display: grid;
+          gap: 6px;
+        }
+
+        .marker-layer-entities small,
+        .layer-entity-merge > span {
+          color: var(--secondary-text-color);
+          font-weight: 400;
+        }
+
+        .layer-entity-row {
+          display: grid;
+          grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.4fr) 32px;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .layer-entity-row > span,
+        .layer-entity-row > small {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .layer-entity-row select {
+          min-width: 0;
         }
 
         .marker-display-picker {

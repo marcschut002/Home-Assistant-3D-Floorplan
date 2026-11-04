@@ -288,6 +288,40 @@ whose icons are normally hidden. A layer's `marker_display` (`icon` or `value`)
 overrides the marker setting while that layer is active. With **All** selected,
 markers behave as they normally do.
 
+### One marker per device: a sensor per layer
+
+A device often has several sensors that belong to different layers, such as a motion
+sensor that also measures temperature and light. Instead of placing a marker for each
+sensor, place one marker and tell it which sensor to show per layer with
+`layer_entities`:
+
+```yaml
+markers:
+  - entity: binary_sensor.hall_motion        # primary: shown in All
+    layer_entities:
+      climate: sensor.hall_temperature
+      energy: sensor.hall_illuminance
+```
+
+With **All** selected, the marker shows its primary `entity`. With a layer
+selected that has a sensor in `layer_entities`, the marker shows that sensor
+in the same spot, with that sensor's own icon, value and tap action. A layer
+sensor also puts the marker in that layer. Layers without a sensor behave as
+before: the primary sensor shows when it belongs to the layer, and the marker is
+hidden otherwise. The marker's `icon`, `color_thresholds` and tap/hold actions apply
+to the primary sensor only.
+
+In Edit Mode, the marker panel has a **Sensor per layer** group with one picker per
+layer, listing the other sensors of the same device. Sensors that match the layer
+come first.
+
+- **Auto-fill** fills every empty layer with a matching sensor of the device.
+- The star button makes a layer's sensor the primary sensor. The old primary then
+  moves into the layers it belonged to.
+- Sensors of the device that already have their own marker on this floor appear
+  under **Placed separately**. Merging one fills the layers it belongs to and removes
+  its own marker. Picking such a sensor in a layer picker removes its marker as well.
+
 Select a layer from another card with `hafp_layer`. Use `hafp_layer=all` to go
 back to **All**. It combines with `hafp_floor` and `hafp_view`:
 
