@@ -11117,9 +11117,14 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           gap: 4px;
         }
 
-        .marker-layer-entities,
-        .layer-entity-merge {
+        .marker-layer-entities {
           grid-column: 1 / 4;
+          display: grid;
+          gap: 6px;
+        }
+
+        /* No grid-column here: inside the one-column section it would add columns. */
+        .layer-entity-merge {
           display: grid;
           gap: 6px;
         }
