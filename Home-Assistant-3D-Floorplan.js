@@ -22,6 +22,11 @@ function uiTexts(hass) {
 
 // Edit-only layer filter: markers that belong to no layer.
 const NO_LAYER = "__none__";
+// group_by_area layers add up power readings; other units are not summed.
+const POWER_UNIT_FACTORS = { mW: 0.001, W: 1, kW: 1000, MW: 1000000 };
+// Room colour bands for group_by_area layers: below the first threshold, then between each pair, then above the last.
+const ROOM_LOAD_COLORS = ["#9e9e9e", "#43a047", "#fb8c00", "#e53935"];
+const DEFAULT_ROOM_THRESHOLDS = [50, 250, 1000];
 // Domains left out of the "Add" list unless "Show all entity types" is on.
 const SYSTEM_DOMAINS = [
   "automation", "script", "scene", "update", "zone", "sun", "conversation", "tts", "stt", "wake_word",
@@ -233,7 +238,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._activeRequestedModelView = "";
     this._activeModelView = "default";
     this._layers = this._normalizedLayers(this._config.layers);
-    this._activeLayer = this._layerById((newRequest && this._requestedLayerId()) || this._activeLayer || this._config.default_layer)?.id || "";
+    this._activeLayer = this._layerById((newRequest && this._requestedLayerId()) || this._activeLayer || this._config.default_layer)?.id
+      || (this._isAllLayerHidden() ? this._fallbackLayerId() : "");
     this._display = this._normalizedDisplay({
       markerSize: this._config.marker_size,
       showLabels: this._config.show_labels,
@@ -322,6 +328,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       activeFloor: this._activeFloorId,
       layers: this._layers.map((layer) => ({ id: layer.id, name: layer.name, icon: layer.icon })),
       activeLayer: this._activeLayer === NO_LAYER ? "" : this._activeLayer,
+      showAllLayer: this._config?.show_all_layer !== false,
       views: [
         ...(this._modelDefaultViews?.[floorId]
           ? [{ id: "default", name: this._modelDefaultViews[floorId].name || "", icon: this._modelDefaultViews[floorId].icon || "mdi:home-outline", color: "" }]
@@ -383,6 +390,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (this._activeLayer === NO_LAYER) this._activeLayer = "";
     const layout = this._yamlExport(this._deviceRows());
     this._mode = "user";
+    // "All markers" is an Edit Mode filter only when the "All" layer is hidden.
+    if (!this._activeLayer && this._isAllLayerHidden()) this._activeLayer = this._fallbackLayerId();
     this._render();
     // Opened from the card editor: put the layout in the card config, so Save stores it.
     if (this._isInEditorPreview() && layout !== this._layoutAtOpen) {
@@ -1233,6 +1242,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         illuminanceEntity: zone.illuminance_entity || zone.illuminanceEntity || zone.illuminance?.entity || "",
         showLux: zone.show_lux === true || zone.showLux === true || zone.illuminance?.show_lux === true,
         lightingMode: zone.lighting_mode || zone.lightingMode || "area",
+        ...(String(zone.area || "").trim() ? { area: String(zone.area).trim() } : {}),
         points: (zone.points || []).map((point) => this._zoneDisplayPointToModel(point)).filter((point) => this._isSafeModelPoint(point)),
       };
       return zones;
@@ -1493,6 +1503,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ...(icon && iconPosition ? { icon_position: iconPosition } : {}),
       ...(icon && iconColor ? { icon_color: iconColor } : {}),
       ...(icon && (view.icon_on_model === false || view.iconOnModel === false) ? { icon_on_model: false } : {}),
+      ...(String(view.area || "").trim() ? { area: String(view.area).trim() } : {}),
     };
   }
 
@@ -1571,6 +1582,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         illuminanceEntity: zone.illuminanceEntity || zone.illuminance_entity || zone.illuminance?.entity || "",
         showLux: zone.showLux === true || zone.show_lux === true || zone.illuminance?.show_lux === true,
         lightingMode: zone.lightingMode || zone.lighting_mode || "area",
+        ...(String(zone.area || "").trim() ? { area: String(zone.area).trim() } : {}),
         points,
       };
       return result;
@@ -2955,6 +2967,10 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         <input data-zone-name="${this._escape(activeZone.id)}" value="${this._escape(activeZone.name)}" />
       </label>
       <label>
+        <span>Home Assistant area</span>
+        ${this._haAreaSelect(`data-zone-area="${this._escape(activeZone.id)}"`, activeZone.area, "Match by name")}
+      </label>
+      <label>
         <span>Color</span>
         <input data-zone-color="${this._escape(activeZone.id)}" type="color" value="${this._escape(activeZone.color || "#f8d66d")}" />
       </label>
@@ -3101,6 +3117,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         <button type="button" data-view-icon-pick class="${this._pendingViewIconPick ? "active" : ""}">${this._pendingViewIconPick ? "Click model…" : "Pick on Model"}</button>
         <button type="button" data-view-icon-position-clear>Use Target</button>
       </div>`}` : ""}
+      ${isHome ? "" : `
+      <label>
+        <span>Home Assistant area</span>
+        ${this._haAreaSelect("data-view-area", draft.area, "Match by view name")}
+      </label>`}
       <button type="button" class="panel-button primary" data-view-save>Save view</button>
       ${existing && isHome ? `<button type="button" class="panel-button danger" data-view-home="clear">Clear Home view</button>` : ""}
       ${existing && !isHome ? `<button type="button" class="panel-button danger" data-view-remove="${this._escape(draft.originalName)}">Remove view</button>` : ""}
@@ -3194,7 +3215,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         const name = event.currentTarget.dataset.viewSelect;
         const view = this._modelViews?.[this._activeFloorId || "default"]?.[name];
         if (!view) return;
-        this._modelViewDraft = { name, originalName: name, position: [...view.position], target: [...view.target], zoom: view.zoom || 1, icon: view.icon || "", iconPosition: [...(view.icon_position || [])], iconColor: view.icon_color || "", iconOnModel: view.icon_on_model !== false };
+        this._modelViewDraft = { name, originalName: name, position: [...view.position], target: [...view.target], zoom: view.zoom || 1, icon: view.icon || "", iconPosition: [...(view.icon_position || [])], iconColor: view.icon_color || "", iconOnModel: view.icon_on_model !== false, area: view.area || "" };
         this._pendingViewIconPick = false;
         this._viewDetailOpen = true;
         this._refreshModelViewTools();
@@ -3239,6 +3260,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       element.addEventListener("change", (event) => {
         this._modelViewDraft = { ...this._modelViewDraft, iconColor: this._normalizeHexColor(event.currentTarget.value) };
         this._refreshModelViewTools();
+      });
+    });
+    root?.querySelectorAll("[data-view-area]").forEach((element) => {
+      element.addEventListener("change", (event) => {
+        this._modelViewDraft = { ...this._modelViewDraft, area: event.currentTarget.value };
       });
     });
     root?.querySelectorAll("[data-view-icon-on-model]").forEach((element) => {
@@ -3334,6 +3360,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const iconPosition = icon ? this._numberArray(this._modelViewDraft?.iconPosition, 3) : null;
     const iconColor = icon ? this._normalizeHexColor(this._modelViewDraft?.iconColor) : "";
     const originalName = this._modelViewDraft?.originalName;
+    const area = String(this._modelViewDraft?.area || "").trim();
     const view = {
       position,
       target,
@@ -3342,6 +3369,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       ...(iconPosition ? { icon_position: iconPosition } : {}),
       ...(iconColor ? { icon_color: iconColor } : {}),
       ...(icon && this._modelViewDraft?.iconOnModel === false ? { icon_on_model: false } : {}),
+      ...(area ? { area } : {}),
     };
     if (originalName && originalName !== name && this._modelViews[floorId][originalName]) {
       this._modelViews[floorId] = Object.fromEntries(
@@ -3352,7 +3380,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     } else {
       this._modelViews[floorId][name] = view;
     }
-    this._modelViewDraft = { name, originalName: name, position, target, zoom, icon, iconPosition: iconPosition || [], iconColor, iconOnModel: this._modelViewDraft?.iconOnModel !== false };
+    this._modelViewDraft = { name, originalName: name, position, target, zoom, icon, iconPosition: iconPosition || [], iconColor, iconOnModel: this._modelViewDraft?.iconOnModel !== false, area };
     this._pendingViewIconPick = false;
     this._viewDetailOpen = false;
     this._saveModelViews();
@@ -3495,6 +3523,16 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         zone.name = event.currentTarget.value.trim() || zone.name;
         this._saveZones();
         this._refreshZoneTools();
+      });
+    });
+    root?.querySelectorAll("[data-zone-area]").forEach((element) => {
+      element.addEventListener("change", (event) => {
+        const zone = this._zones[event.currentTarget.dataset.zoneArea];
+        if (!zone) return;
+        if (event.currentTarget.value) zone.area = event.currentTarget.value;
+        else delete zone.area;
+        this._saveZones();
+        this._refresh3DMarkerOverlay();
       });
     });
     root?.querySelectorAll("[data-zone-lighting-mode]").forEach((element) => {
@@ -4747,12 +4785,18 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   // active color. Hidden markers (other floor, layer, view) highlight nothing.
   _activeAreaHighlights() {
     if (this._mode === "edit") return [];
-    return this._modelMarkerRows().flatMap(({ row, marker }) => {
+    const markerRows = this._modelMarkerRows();
+    const markerHighlights = markerRows.flatMap(({ row, marker }) => {
       if (this._isMarkerOnOtherFloor(marker) || this._isMarkerFilteredOut(row, { views: true })) return [];
       const zone = this._markerActiveZone(row, marker);
       if (!zone || (zone.points || []).length < 3) return [];
       return [{ zoneId: zone.id, color: this._resolveCssColor(this._markerAreaActiveColor(row)) }];
     });
+    // group_by_area: each room with a zone is coloured by its total. Rooms without a zone only get their marker.
+    const roomHighlights = this._areaGroups(this._groupingLayer(), markerRows)
+      .filter((group) => group.zone)
+      .map((group) => ({ zoneId: group.zone.id, color: group.color }));
+    return [...markerHighlights, ...roomHighlights];
   }
 
   _markerAreaActiveColor(row) {
@@ -4833,8 +4877,167 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         deviceClasses: this._normalizeViewNames(layer.device_classes || layer.deviceClasses),
         entities: this._normalizeViewNames(layer.entities),
         markerDisplay: markerDisplay === "hide" ? "" : markerDisplay,
+        groupByArea: layer.group_by_area === true || layer.groupByArea === true,
+        thresholds: this._normalizeThresholdList(layer.thresholds) || DEFAULT_ROOM_THRESHOLDS,
+        minValue: this._optionalNumber(layer.min_value ?? layer.minValue),
       }];
     });
+  }
+
+  // "50, 250, 1000" or [50, 250, 1000] -> ascending numbers; null when nothing usable.
+  _normalizeThresholdList(value) {
+    const items = Array.isArray(value) ? value : String(value ?? "").split(",");
+    const numbers = items.map((item) => this._optionalNumber(item)).filter((item) => item !== null);
+    return numbers.length ? [...new Set(numbers)].sort((a, b) => a - b) : null;
+  }
+
+  _optionalNumber(value) {
+    if (value === null || value === undefined || String(value).trim() === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  // ---- "Alles" layer -------------------------------------------------------
+
+  // show_all_layer: false removes the "All" choice outside Edit Mode.
+  _isAllLayerHidden() {
+    return this._config?.show_all_layer === false && this._layers.length > 0 && this._mode !== "edit";
+  }
+
+  _fallbackLayerId() {
+    return this._layerById(this._config?.default_layer)?.id || this._layers[0]?.id || "";
+  }
+
+  // ---- Group by area (e.g. energy per room) --------------------------------
+
+  // <select> of Home Assistant areas; the empty choice falls back to matching by name.
+  // A value that is no longer an area (renamed or typed in YAML) stays selectable.
+  _haAreaSelect(attributes, value, emptyLabel) {
+    const areas = (this._areas || [])
+      .map((area) => ({ id: area.area_id || area.id, name: area.name || area.area_id || area.id }))
+      .filter((area) => area.id)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const current = String(value || "");
+    const known = !current || areas.some((area) => area.id === current);
+    return `
+      <select ${attributes}>
+        <option value="" ${current ? "" : "selected"}>${this._escape(emptyLabel)}</option>
+        ${known ? "" : `<option value="${this._escape(current)}" selected>${this._escape(current)}</option>`}
+        ${areas.map((area) => `<option value="${this._escape(area.id)}" ${area.id === current ? "selected" : ""}>${this._escape(area.name)}</option>`).join("")}
+      </select>
+    `;
+  }
+
+  // The active layer when it groups markers per Home Assistant area. Edit Mode always shows every marker.
+  _groupingLayer() {
+    if (this._mode === "edit") return null;
+    const layer = this._layerById(this._activeLayer);
+    return layer?.groupByArea ? layer : null;
+  }
+
+  // Watts for a power reading, or null when the state is not a number in mW/W/kW/MW.
+  _powerWatts(row) {
+    const factor = POWER_UNIT_FACTORS[String(row?.unit || "").trim()];
+    if (!factor) return null;
+    if (row.offline) return NaN;
+    const value = Number(row.primaryState);
+    return Number.isFinite(value) ? value * factor : NaN;
+  }
+
+  _formatPower(watts) {
+    if (!Number.isFinite(watts)) return "–";
+    if (Math.abs(watts) >= 1000) return `${(watts / 1000).toFixed(1)} kW`;
+    if (Math.abs(watts) >= 10) return `${Math.round(watts)} W`;
+    return `${watts.toFixed(1)} W`;
+  }
+
+  _roomLoadColor(watts, thresholds = DEFAULT_ROOM_THRESHOLDS) {
+    if (!Number.isFinite(watts)) return ROOM_LOAD_COLORS[0];
+    const band = thresholds.filter((threshold) => watts >= threshold).length;
+    return ROOM_LOAD_COLORS[Math.min(band, ROOM_LOAD_COLORS.length - 1)];
+  }
+
+  // A zone or view belongs to an area by its `area:` field (area id or name), else by its own name.
+  // Case, spaces, "-" and "_" are ignored: "Woon kamer" matches area "woonkamer".
+  _matchesArea(item, name, areaId, areaName) {
+    const key = (value) => this._stateSlug(value).replace(/-/g, "");
+    const areaKeys = [key(areaId), key(areaName)].filter(Boolean);
+    if (item?.area) return areaKeys.includes(key(item.area));
+    return [name, item?.id, item?.name].some((value) => value && areaKeys.includes(key(value)));
+  }
+
+  _zoneForArea(areaId, areaName) {
+    return Object.values(this._zones || {}).find((zone) => (zone.points || []).length >= 3 && this._matchesArea(zone, zone.name, areaId, areaName)) || null;
+  }
+
+  // The area the active camera view is about, e.g. view "Keuken" -> area "Keuken".
+  _isActiveViewOfArea(areaId, areaName) {
+    const viewName = this._activeModelView;
+    if (!viewName || viewName === "default") return false;
+    const view = this._modelViews?.[this._activeFloorId || "default"]?.[viewName];
+    return Boolean(view) && this._matchesArea(view, viewName, areaId, areaName);
+  }
+
+  // Markers of the grouping layer, per Home Assistant area of the sensor they show.
+  // Markers without an area, or whose sensor is not a power reading, are not grouped.
+  _areaGroups(layer = this._groupingLayer(), markerRows = this._modelMarkerRows()) {
+    if (!layer) return [];
+    const groups = new Map();
+    markerRows.forEach((item) => {
+      const { row, shown, marker } = item;
+      if (this._isMarkerOnOtherFloor(marker) || this._isMarkerFilteredOut(row, { views: true })) return;
+      const watts = this._powerWatts(shown);
+      if (watts === null || !shown.areaId || shown.areaId === "unknown") return;
+      if (!groups.has(shown.areaId)) groups.set(shown.areaId, { areaId: shown.areaId, areaName: shown.areaName, members: [], total: 0, unknown: 0 });
+      const group = groups.get(shown.areaId);
+      group.members.push(item);
+      if (Number.isFinite(watts)) group.total += watts;
+      else group.unknown += 1;
+    });
+    return [...groups.values()].map((group) => {
+      const zone = this._zoneForArea(group.areaId, group.areaName);
+      const known = group.members.length > group.unknown;
+      return {
+        ...group,
+        total: known ? group.total : NaN,
+        zone,
+        color: this._roomLoadColor(known ? group.total : NaN, layer.thresholds),
+        expanded: this._expandedAreas?.has(group.areaId) || this._isActiveViewOfArea(group.areaId, group.areaName),
+        keys: new Set(group.members.map(({ row }) => row.key)),
+      };
+    });
+  }
+
+  // Room marker position: the centre of the area's zone at the members' average height,
+  // or the average position of the members when the area has no zone.
+  _areaGroupPoint(group) {
+    const points = group.members.map(({ row, marker }) => this._modelToDisplayPoint(this._markerAreaPoint(row, marker) || marker));
+    const average = ["x", "y", "z"].reduce((result, axis) => {
+      result[axis] = points.reduce((sum, point) => sum + (Number(point[axis]) || 0), 0) / points.length;
+      return result;
+    }, {});
+    const centre = group.zone ? this._zoneCentre(group.zone) : null;
+    if (centre) {
+      const [firstAxis, secondAxis] = this._floorAxes();
+      average[firstAxis] = centre[firstAxis];
+      average[secondAxis] = centre[secondAxis];
+    }
+    return this._displayToModelPoint(average);
+  }
+
+  _toggleAreaExpanded(areaId) {
+    this._expandedAreas = this._expandedAreas || new Set();
+    if (this._expandedAreas.has(areaId)) this._expandedAreas.delete(areaId);
+    else this._expandedAreas.add(areaId);
+    this._refresh3DMarkerOverlay();
+  }
+
+  // min_value: a reading below it still counts towards the room total but shows no marker.
+  _isBelowLayerMinimum(shown, layer) {
+    if (!layer || layer.minValue === null) return false;
+    const watts = this._powerWatts(shown);
+    const value = watts === null ? Number(shown?.primaryState) : watts;
+    return Number.isFinite(value) && value < layer.minValue;
   }
 
   _layerSlug(value) {
@@ -4914,9 +5117,11 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _setActiveLayer(id) {
-    const layerId = id === NO_LAYER && this._mode === "edit" ? NO_LAYER : this._layerById(id)?.id || "";
+    const chosen = id === NO_LAYER && this._mode === "edit" ? NO_LAYER : this._layerById(id)?.id || "";
+    const layerId = chosen || (this._isAllLayerHidden() ? this._fallbackLayerId() : "");
     if (layerId === this._activeLayer) return;
     this._activeLayer = layerId;
+    this._expandedAreas?.clear();
     this._refreshLayerSwitcher();
     this._broadcastNavState();
     if (this._modelViewer) {
@@ -4928,7 +5133,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
 
   _layerSwitcherTemplate() {
     if (!this._layers.length || this._config.show_layer_switcher === false) return "";
-    const buttons = [{ id: "", name: uiTexts(this._hass).all, icon: "mdi:layers-outline" }, ...this._layers];
+    const buttons = [...(this._isAllLayerHidden() ? [] : [{ id: "", name: uiTexts(this._hass).all, icon: "mdi:layers-outline" }]), ...this._layers];
     return `
       <div class="layer-switcher" role="toolbar" aria-label="Marker layers">
         ${buttons.map((layer) => `
@@ -4956,6 +5161,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         event.preventDefault();
         event.stopPropagation();
         const id = event.currentTarget.dataset.layer;
+        // Tapping the active layer goes back to "All", unless "All" is hidden: then it stays.
+        if (id === this._activeLayer && this._isAllLayerHidden()) return;
         this._setActiveLayer(id === this._activeLayer ? "" : id);
       });
     });
@@ -6246,6 +6453,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
                     ...(zone.lightingMode === "positional" ? [`        lighting_mode: positional`] : []),
                     ...(zone.illuminanceEnabled ? [`        illuminance_enabled: true`, ...(zone.illuminanceEntity ? [`        illuminance_entity: ${zone.illuminanceEntity}`] : [])] : []),
                     ...(zone.showLux ? [`        show_lux: true`] : []),
+                    ...(zone.area ? [`        area: ${zone.area}`] : []),
                     "        points:",
                     ...zone.points.flatMap((point) => this._yamlZonePointLines(point, "          ")),
                   ]),
@@ -6327,6 +6535,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
               ...(zone.lightingMode === "positional" ? [`    lighting_mode: positional`] : []),
               ...(zone.illuminanceEnabled ? [`    illuminance_enabled: true`, ...(zone.illuminanceEntity ? [`    illuminance_entity: ${zone.illuminanceEntity}`] : [])] : []),
               ...(zone.showLux ? [`    show_lux: true`] : []),
+              ...(zone.area ? [`    area: ${zone.area}`] : []),
               "    points:",
               ...zone.points.flatMap((point) => this._yamlZonePointLines(point, "      ")),
             ]),
@@ -6404,6 +6613,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         ...(view.icon_position ? [`${indent}    icon_position: ${formatArray(view.icon_position)}`] : []),
         ...(view.icon_color ? [`${indent}    icon_color: "${view.icon_color}"`] : []),
         ...(view.icon_on_model === false ? [`${indent}    icon_on_model: false`] : []),
+        ...(view.area ? [`${indent}    area: ${view.area}`] : []),
       ]),
     ];
   }
@@ -6537,6 +6747,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         illuminanceEntity: zone.illuminanceEntity || "",
         showLux: zone.showLux === true,
         lightingMode: zone.lightingMode || "area",
+        ...(zone.area ? { area: zone.area } : {}),
         points: (zone.points || []).map((point) => {
           const displayPoint = this._modelToDisplayPoint(point);
           return {
@@ -7225,10 +7436,16 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _build3DMarkerButtons(markerLayer, THREE, camera) {
     if (!markerLayer) return [];
     markerLayer.innerHTML = "";
-    const markerButtons = this._modelMarkerRows().flatMap(({ row, shown, marker }) => {
+    const markerRows = this._modelMarkerRows();
+    const activeLayer = this._mode === "edit" ? null : this._layerById(this._activeLayer);
+    // group_by_area: a collapsed room shows one room marker instead of its devices.
+    const areaGroups = this._areaGroups(this._groupingLayer(), markerRows);
+    const collapsedKeys = new Set(areaGroups.filter((group) => !group.expanded).flatMap((group) => [...group.keys]));
+    const markerButtons = markerRows.flatMap(({ row, shown, marker }) => {
       if (this._isMarkerOnOtherFloor(marker)) return [];
       const hidden = this._isMarkerFilteredOut(row, { views: true });
       if (hidden && this._mode !== "edit") return [];
+      if (collapsedKeys.has(row.key) || this._isBelowLayerMinimum(shown, activeLayer)) return [];
       const button = document.createElement("button");
       button.type = "button";
       const stateClass = this._stateClass(shown);
@@ -7313,7 +7530,36 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       }
       return buttons;
     });
-    return [...markerButtons, ...this._build3DViewIconButtons(markerLayer, THREE)];
+    return [...markerButtons, ...this._build3DAreaGroupButtons(markerLayer, THREE, areaGroups), ...this._build3DViewIconButtons(markerLayer, THREE)];
+  }
+
+  // One marker per room with the summed power; a tap opens or closes the room's devices.
+  _build3DAreaGroupButtons(markerLayer, THREE, groups) {
+    return groups.map((group) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = `model-marker room-marker value-marker with-label state-threshold ${group.expanded ? "expanded" : ""}`;
+      button.dataset.area = group.areaId;
+      const value = `${this._formatPower(group.total)}${group.unknown && Number.isFinite(group.total) ? "*" : ""}`;
+      const unknown = group.unknown ? ` (${group.unknown} unavailable)` : "";
+      button.title = `${group.areaName} - ${this._formatPower(group.total)}${unknown}`;
+      button.setAttribute("aria-expanded", group.expanded ? "true" : "false");
+      button.style.setProperty("--marker-size", `${this._display.markerSize}px`);
+      button.style.setProperty("--marker-threshold-color", group.color);
+      button.innerHTML = `
+        <span class="value-face">${this._escape(value)}</span>
+        <strong>${this._escape(group.areaName)}</strong>
+      `;
+      ["pointerdown", "pointerup"].forEach((type) => button.addEventListener(type, (event) => event.stopPropagation()));
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this._toggleAreaExpanded(group.areaId);
+      });
+      markerLayer.appendChild(button);
+      const point = this._areaGroupPoint(group);
+      return { button, position: new THREE.Vector3(point.x, point.y, point.z) };
+    });
   }
 
   _build3DViewIconButtons(markerLayer, THREE) {
@@ -12310,6 +12556,25 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           box-shadow: 0 0 0 2px var(--marker-area-color), 0 0 16px var(--marker-area-color);
         }
 
+        /* group_by_area: one marker per room with the summed value. */
+        .model-marker.room-marker {
+          padding-right: 10px;
+        }
+
+        .model-marker.room-marker span.value-face {
+          height: calc(var(--marker-size, 22px) + 4px);
+          font-size: 12px;
+        }
+
+        .model-marker.room-marker strong {
+          font-size: 12px;
+          white-space: nowrap;
+        }
+
+        .model-marker.room-marker.expanded {
+          box-shadow: 0 0 0 2px var(--marker-threshold-color), 0 5px 18px rgba(0, 0, 0, 0.32);
+        }
+
         .layer-switcher {
           position: absolute;
           left: 12px;
@@ -13576,7 +13841,8 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <ha-button class="floor-config-add" data-layer-add>Add layer</ha-button>
           ${Array.isArray(this._config.layers) && this._config.layers.length ? `
           <div class="editor-grid">
-            ${this._selectInput("default_layer", "Default Layer", [["", "All"], ...this._config.layers.map((layer, index) => [String(layer.id || layer.name || `layer_${index + 1}`), String(layer.name || layer.id || `Layer ${index + 1}`)])], "")}
+            ${this._checkboxInput("show_all_layer", "Show \"All\" Layer", true)}
+            ${this._selectInput("default_layer", "Default Layer", [["", this._config.show_all_layer === false ? "First layer" : "All"], ...this._config.layers.map((layer, index) => [String(layer.id || layer.name || `layer_${index + 1}`), String(layer.name || layer.id || `Layer ${index + 1}`)])], "")}
           </div>` : ""}
         </section>
 
@@ -13759,7 +14025,11 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
           <ha-input class="editor-field" data-layer-field="domains" data-layer-index="${index}" label="Domains" type="text" value="${this._escape(list(layer.domains))}" placeholder="light"></ha-input>
           <ha-input class="editor-field" data-layer-field="device_classes" data-layer-index="${index}" label="Device Classes" type="text" value="${this._escape(list(layer.device_classes))}" placeholder="temperature, humidity"></ha-input>
           <ha-input class="editor-field" data-layer-field="entities" data-layer-index="${index}" label="Entities" type="text" value="${this._escape(list(layer.entities))}" placeholder="switch.heater"></ha-input>
+          <ha-select class="editor-field" data-layer-field="group_by_area" data-layer-index="${index}" label="Grouping" value="${layer.group_by_area === true ? "area" : ""}">${[["", "Per marker"], ["area", "Per area (sum of power)"]].map(([value, label]) => `<ha-list-item value="${value}">${label}</ha-list-item>`).join("")}</ha-select>
+          <ha-input class="editor-field" data-layer-field="thresholds" data-layer-index="${index}" label="Area Color Thresholds (W)" type="text" value="${this._escape(list(layer.thresholds))}" placeholder="${DEFAULT_ROOM_THRESHOLDS.join(", ")}"></ha-input>
+          <ha-input class="editor-field" data-layer-field="min_value" data-layer-index="${index}" label="Hide Markers Below" type="number" value="${this._escape(layer.min_value ?? "")}" placeholder="1"></ha-input>
         </div>
+        <div class="editor-help">Per area adds up the power sensors of each Home Assistant area into one marker, and colors the area's brightness zone (matched by its area field or name). Tap the room marker, or open the room's camera view, to see the devices. Markers below "Hide Markers Below" still count towards the total.</div>
         ` : ""}
       </article>
     `;
@@ -13769,14 +14039,19 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
   _handleLayerInput(input) {
     const index = Number(input.dataset.layerIndex);
     const key = input.dataset.layerField;
-    if (!Number.isInteger(index) || !["name", "id", "icon", "marker_display", "domains", "device_classes", "entities"].includes(key)) return;
+    if (!Number.isInteger(index) || !["name", "id", "icon", "marker_display", "domains", "device_classes", "entities", "group_by_area", "thresholds", "min_value"].includes(key)) return;
     const nextConfig = JSON.parse(JSON.stringify(this._config || {}));
     const layer = Array.isArray(nextConfig.layers) ? nextConfig.layers[index] : null;
     if (!layer) return;
+    const raw = String(input.value || "").trim();
+    const numbers = raw.split(",").map((item) => item.trim()).filter((item) => item !== "" && Number.isFinite(Number(item))).map(Number);
     const value = ["domains", "device_classes", "entities"].includes(key)
-      ? String(input.value || "").split(",").map((item) => item.trim()).filter(Boolean)
-      : String(input.value || "").trim();
-    if (Array.isArray(value) ? value.length : value) layer[key] = value;
+      ? raw.split(",").map((item) => item.trim()).filter(Boolean)
+      : key === "group_by_area" ? raw === "area"
+      : key === "thresholds" ? numbers
+      : key === "min_value" ? (numbers.length === 1 && !raw.includes(",") ? numbers[0] : "")
+      : raw;
+    if (typeof value === "number" || (Array.isArray(value) ? value.length : value)) layer[key] = value;
     else delete layer[key];
     this._commitConfig(nextConfig);
     if (key === "name" || key === "id" || key === "icon") this._render();
@@ -14279,6 +14554,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
       "model_background",
       "view_mode",
       "show_layer_switcher",
+      "show_all_layer",
       "show_labels",
       "show_entity_state",
       "marker_color",
@@ -14903,7 +15179,7 @@ class HomeAssistant3DFloorplanNav extends HTMLElement {
         ? { kind: "floor", title: this._text("floors"), items: state.floors.map((floor) => ({ value: floor.id, name: floor.name, icon: floor.icon || "mdi:stairs", active: floor.id === state.activeFloor })) }
         : null,
       layers: state.layers.length
-        ? { kind: "layer", title: this._text("layers"), items: [{ id: "", name: this._text("all"), icon: "mdi:layers-outline" }, ...state.layers].map((layer) => ({ value: layer.id, name: layer.name, icon: layer.icon, active: layer.id === state.activeLayer })) }
+        ? { kind: "layer", title: this._text("layers"), items: [...(state.showAllLayer === false ? [] : [{ id: "", name: this._text("all"), icon: "mdi:layers-outline" }]), ...state.layers].map((layer) => ({ value: layer.id, name: layer.name, icon: layer.icon, active: layer.id === state.activeLayer })) }
         : null,
       views: state.views.length
         ? { kind: "view", title: this._text("views"), items: state.views.map((view) => ({ value: view.id, name: view.id === "default" ? view.name || this._text("home") : view.name, icon: view.icon, color: view.color, active: view.id === state.activeView })) }

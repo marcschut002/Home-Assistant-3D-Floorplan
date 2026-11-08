@@ -337,6 +337,54 @@ buttons instead. A link without `hafp_layer` keeps the current layer.
 Layers can also be managed in the visual card editor under **Layers**, where the
 arrow buttons set their order in the navigation card and the layer switcher.
 
+### Hiding "All"
+
+Set `show_all_layer: false` to remove **All** from the layer switcher and the
+navigation card. The card then opens on `default_layer` (or the first layer),
+clicking the active layer keeps it selected, and `hafp_layer=all` falls back to that
+layer. Edit Mode still offers *All markers* so every marker can be found.
+
+### Totals per room
+
+A layer with `group_by_area: true` adds up the power sensors per Home Assistant area
+and shows one marker per room with the total, instead of one marker per device:
+
+```yaml
+layers:
+  - id: energy
+    name: Energy
+    icon: mdi:flash
+    device_classes: [power]
+    group_by_area: true
+    thresholds: [50, 250, 1000]  # W; grey below 50, then green, orange, red above 1000
+    min_value: 1                 # devices below 1 W count, but show no marker
+```
+
+- The room is the Home Assistant area of the sensor the marker shows in this layer
+  (its `layer_entities` sensor, else its own entity). Markers without an area, and
+  sensors that are not in mW, W, kW or MW, stay single markers.
+- A brightness zone of that room is coloured by the total. A zone belongs to an area
+  by its `area:` field (area id or name), else by its own name; case, spaces, `-`
+  and `_` are ignored. A room without a zone only gets its marker.
+- Tap the room marker to show its devices, and tap it again to close them. In a
+  camera view of that room (matched the same way: `area:` on the view, else the view
+  name) its devices are always shown.
+- Unavailable sensors do not count; the total then gets a `*`.
+- Edit Mode always shows every marker.
+
+```yaml
+brightness_zones:
+  - id: open_keuken
+    name: Open keuken
+    area: keuken          # Home Assistant area id or name
+views:
+  Kookeiland:
+    area: keuken
+```
+
+Both can also be picked in Edit Mode: **Areas** → area → *Home Assistant area*, and
+**Views** → view → *Home Assistant area*.
+
 ## Named Camera Views
 
 Define additional 3D camera views next to `default_view`. A view name can then be
