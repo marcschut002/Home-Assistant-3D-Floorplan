@@ -10111,9 +10111,15 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         :host([layout="grid"][auto-height]),
         :host([layout="grid"][auto-height]) ha-card,
         :host([layout="grid"][auto-height]) .panel,
-        :host([layout="grid"][auto-height]) aside,
         :host([layout="grid"][auto-height]) main {
           height: auto;
+        }
+
+        /* The model sets the row height; the sidebar must not grow it, only fill it and scroll its list. */
+        :host([layout="grid"][auto-height]) aside {
+          height: auto;
+          align-self: stretch;
+          contain: size;
         }
 
         :host([layout="grid"][auto-height]) .model-viewer {
