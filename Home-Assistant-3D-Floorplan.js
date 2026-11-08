@@ -216,6 +216,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const modelHeight = String(this._config.model_height || "").trim();
     if (modelHeight) this.style.setProperty("--hafp-model-height", modelHeight);
     else this.style.removeProperty("--hafp-model-height");
+    // Sections view with "fit height to content" (rows: auto): size by Model Height instead of grid rows.
+    this.toggleAttribute("auto-height", this._config.grid_options?.rows === "auto");
     const navigationKey = this._requestedNavigationKey();
     const newRequest = navigationKey !== this._handledNavigationKey;
     if (newRequest) {
@@ -10106,6 +10108,24 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           min-height: 0;
         }
 
+        :host([layout="grid"][auto-height]),
+        :host([layout="grid"][auto-height]) ha-card,
+        :host([layout="grid"][auto-height]) .panel,
+        :host([layout="grid"][auto-height]) aside,
+        :host([layout="grid"][auto-height]) main {
+          height: auto;
+        }
+
+        :host([layout="grid"][auto-height]) .model-viewer {
+          flex: none;
+          height: var(--hafp-model-height, clamp(520px, 82vh, 1100px));
+        }
+
+        :host([layout="grid"][auto-height]) .map {
+          flex: none;
+          max-height: var(--hafp-model-height, clamp(520px, 82vh, 1100px));
+        }
+
         aside {
           position: sticky;
           top: 12px;
@@ -13529,7 +13549,7 @@ class HomeAssistant3DFloorplanEditor extends HTMLElement {
             ${this._selectInput("model_background_mode", "Model Background Mode", [["", "Use background color"], ["transparent", "Transparent"]])}
             ${this._textInput("model_height", "Model Height", "clamp(520px, 82vh, 1100px)")}
           </div>
-          <div class="editor-help">Model Height accepts any CSS height (e.g. 700px, 80vh). In a sections view the grid height from the Layout tab is used instead.</div>
+          <div class="editor-help">Model Height accepts any CSS height (e.g. 700px, 80vh). In a sections view the grid height from the Layout tab is used instead, unless "fit height to content" is on there; then Model Height applies (e.g. calc(100vh - 180px) to fill the screen).</div>
         </section>
 
         <section>
