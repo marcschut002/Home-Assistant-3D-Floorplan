@@ -3813,9 +3813,15 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   // The active view only changes when a view is chosen; orbiting the camera keeps it.
+  // Choosing a view (also the one already active) collapses rooms opened by clicking them.
   _setActiveModelView(name) {
     const viewName = String(name || "");
-    if (viewName === this._activeModelView) return;
+    const hadExpandedAreas = Boolean(this._expandedAreas?.size);
+    this._expandedAreas?.clear();
+    if (viewName === this._activeModelView) {
+      if (hadExpandedAreas) this._refresh3DMarkerOverlay();
+      return;
+    }
     this._activeModelView = viewName;
     this._refresh3DMarkerOverlay();
     this._broadcastNavState();
@@ -5168,11 +5174,19 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     });
   }
 
-  _markerFace(row) {
+  // iconRow: the marker's own row when row is a layer sensor shown on it, so a value
+  // marker keeps the device's icon (a lamp, a fridge) instead of the sensor's.
+  _markerFace(row, iconRow = row) {
     if (this._markerDisplayMode(row) === "value") {
-      return { type: "value", value: this._formatMarkerValue(row) };
+      return { type: "value", value: this._formatMarkerValue(row), icon: this._markerIcon(iconRow) };
     }
     return { type: "icon", icon: this._markerIcon(row) };
+  }
+
+  _markerFaceHtml(content) {
+    if (content.type !== "value") return `<span><ha-icon icon="${this._escape(content.icon)}"></ha-icon></span>`;
+    const icon = content.icon ? `<ha-icon icon="${this._escape(content.icon)}"></ha-icon>` : "";
+    return `<span class="value-face">${icon}${this._escape(content.value)}</span>`;
   }
 
   _formatMarkerValue(row) {
@@ -6329,7 +6343,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         data-entity="${this._escape(row.entityId)}"
         title="${this._escape(title)}"
       >
-        <span class="${content.type === "value" ? "value-face" : ""}">${content.type === "value" ? this._escape(content.value) : `<ha-icon icon="${this._escape(content.icon)}"></ha-icon>`}</span>
+        ${this._markerFaceHtml(content)}
         ${this._display.showLabels ? `<strong>${this._escape(row.name)}</strong>` : ""}
       </button>
     `;
@@ -7449,7 +7463,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       const button = document.createElement("button");
       button.type = "button";
       const stateClass = this._stateClass(shown);
-      const content = this._markerFace(shown);
+      const content = this._markerFace(shown, row);
       // Color thresholds belong to the primary entity, not to a layer sensor.
       const thresholds = shown.layerEntityOf ? null : marker?.colorThresholds;
       const numericState = Number(shown.primaryState);
@@ -7476,7 +7490,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         button.style.setProperty("--marker-area-color", this._markerAreaActiveColor(row));
       }
       button.innerHTML = `
-        <span class="${content.type === "value" ? "value-face" : ""}">${content.type === "value" ? this._escape(content.value) : `<ha-icon icon="${this._escape(content.icon)}"></ha-icon>`}</span>
+        ${this._markerFaceHtml(content)}
         ${this._display.showLabels ? `<strong>${this._escape(shown.name)}</strong>` : ""}
       `;
       this._attachMarkerPressActions(button, shown);
@@ -12503,6 +12517,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         }
 
         .model-marker span.value-face {
+          display: flex;
+          align-items: center;
+          justify-content: center;
           width: auto;
           min-width: var(--marker-size, 22px);
           padding: 0 6px;
@@ -12512,6 +12529,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           line-height: 1;
           letter-spacing: 0;
           white-space: nowrap;
+        }
+
+        .model-marker span.value-face ha-icon {
+          --mdc-icon-size: 12px;
+          display: inline-flex;
+          margin-right: 3px;
+          line-height: 0;
         }
 
         .model-marker.state-active span {
@@ -13284,6 +13308,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         }
 
         .marker span.value-face {
+          display: flex;
+          align-items: center;
+          justify-content: center;
           flex-basis: auto;
           width: auto;
           min-width: var(--marker-size);
@@ -13294,6 +13321,13 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           line-height: 1;
           letter-spacing: 0;
           white-space: nowrap;
+        }
+
+        .marker span.value-face ha-icon {
+          --mdc-icon-size: 12px;
+          display: inline-flex;
+          margin-right: 3px;
+          line-height: 0;
         }
 
         .marker.online span {
