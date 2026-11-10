@@ -8561,7 +8561,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (this._mode !== "edit" || this._sidebarTab !== "areas" || !this._areaDetailOpen) return [];
     const zone = this._zones[this._activeZoneId];
     if (!zone) return [];
-    return (zone.points || []).map((point, index) => {
+    // Stored points have no height; show the handles on the area's floor (floor offset).
+    const floorPoints = this._offsetZonePoints(zone.points || [], 0.05, this._zoneFloorLevel(zone));
+    return floorPoints.map((point, index) => {
       const button = document.createElement("button");
       button.type = "button";
       button.className = `zone-point-handle ${index === this._activeZonePointIndex ? "active" : ""}`;
