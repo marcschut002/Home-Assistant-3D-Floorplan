@@ -7354,6 +7354,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         requestRender,
         dispose: () => {
           disposed = true;
+          window.clearTimeout(this._modelViewer?.occlusionTimer);
         },
       };
       if (this._pendingRequestedView) {
@@ -7755,6 +7756,8 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     if (!this._modelViewer?.container || !this._modelViewer?.THREE || !this._modelViewer?.camera) return;
     const markerLayer = this._modelViewer.container.querySelector("[data-model-marker-layer]");
     this._modelViewer.markerButtons = this._build3DMarkerButtons(markerLayer, this._modelViewer.THREE, this._modelViewer.camera);
+    // New buttons start without an occlusion state; check them on the next frame.
+    this._modelViewer.occlusionForce = true;
     this._refresh3DZoneOverlay(); // also calls _requestRender()
     this._updateDeviceRowsAfterMarkerChange();
     this._refreshOfflineAlert();
@@ -10099,15 +10102,74 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     const rect = container.getBoundingClientRect?.();
     const width = rect?.width || container.clientWidth || 1;
     const height = rect?.height || container.clientHeight || 1;
+    const checkOcclusion = this._shouldCheckMarkerOcclusion();
     for (const marker of markerButtons) {
       const point = marker.position.clone().project(camera);
       const visible = point.z > -1 && point.z < 1;
       marker.button.hidden = !visible;
       if (!visible) continue;
+      if (checkOcclusion) {
+        // Edit Mode dims instead of hides, so markers behind walls can still be edited.
+        const occluded = this._isMarkerOccluded(marker, THREE, camera);
+        marker.button.classList.toggle("occluded", occluded && this._mode !== "edit");
+        marker.button.classList.toggle("occluded-dim", occluded && this._mode === "edit");
+      }
       const x = (point.x * 0.5 + 0.5) * width;
       const y = (-point.y * 0.5 + 0.5) * height;
       marker.button.style.transform = `translate(${x}px, ${y}px) translate(calc(var(--marker-size, 22px) / -2 - 5px), -50%)`;
     }
+  }
+
+  // Raycasting every marker each frame is costly, so while the camera moves the
+  // check runs a few times per second, plus one trailing pass once it settles.
+  _shouldCheckMarkerOcclusion() {
+    const viewer = this._modelViewer;
+    if (!viewer?.pickableObjects?.length) return false;
+    const interval = 160;
+    const now = performance.now();
+    window.clearTimeout(viewer.occlusionTimer);
+    viewer.occlusionTimer = window.setTimeout(() => {
+      viewer.occlusionForce = true;
+      viewer.requestRender?.();
+    }, interval + 40);
+    if (!viewer.occlusionForce && viewer.lastOcclusionCheck && now - viewer.lastOcclusionCheck < interval) return false;
+    viewer.occlusionForce = false;
+    viewer.lastOcclusionCheck = now;
+    return true;
+  }
+
+  // A marker is hidden behind the model when a solid surface sits clearly between it
+  // and the camera. Markers lie on a surface themselves, hence the tolerance; glass
+  // and other see-through materials don't count. View icons stay visible for navigation.
+  _isMarkerOccluded(marker, THREE, camera) {
+    const viewer = this._modelViewer;
+    if (marker.button.classList.contains("view-marker") || !viewer?.pickableObjects?.length) return false;
+    const origin = camera.getWorldPosition(new THREE.Vector3());
+    const direction = marker.position.clone().sub(origin);
+    const distance = direction.length();
+    if (distance < 1e-6) return false;
+    const size = viewer.modelBounds?.getSize?.(new THREE.Vector3()).length() || distance;
+    const tolerance = Math.max(size * 0.012, distance * 0.03);
+    if (distance <= tolerance) return false;
+    const raycaster = viewer.occlusionRaycaster || (viewer.occlusionRaycaster = new THREE.Raycaster());
+    raycaster.set(origin, direction.normalize());
+    raycaster.near = 0;
+    raycaster.far = distance - tolerance;
+    const hits = raycaster.intersectObjects(viewer.pickableObjects, false);
+    return hits.some((hit) => !this._isSeeThroughHit(hit));
+  }
+
+  _isSeeThroughHit(hit) {
+    let object = hit.object;
+    while (object) {
+      if (object.visible === false) return true;
+      object = object.parent;
+    }
+    const materials = hit.object.material;
+    const material = Array.isArray(materials) ? materials[hit.face?.materialIndex ?? 0] : materials;
+    if (!material || material.visible === false) return true;
+    if (Number(material.transmission) > 0.1) return true;
+    return Boolean(material.transparent) && Number(material.opacity ?? 1) < 0.7;
   }
 
   _addZonePoint(zoneId, point) {
@@ -11378,6 +11440,16 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         .marker.marker-hidden,
         .model-marker.marker-hidden {
           opacity: 0.4;
+        }
+
+        /* Behind a wall from the current camera angle. */
+        .model-marker.occluded {
+          visibility: hidden;
+          pointer-events: none;
+        }
+
+        .model-marker.occluded-dim {
+          opacity: 0.35;
         }
 
         .view-icon-color {
