@@ -7755,8 +7755,15 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _refresh3DMarkerOverlay() {
     if (!this._modelViewer?.container || !this._modelViewer?.THREE || !this._modelViewer?.camera) return;
     const markerLayer = this._modelViewer.container.querySelector("[data-model-marker-layer]");
+    // Carry the occlusion state over to the rebuilt buttons, so a state update
+    // doesn't fade hidden markers in and out again.
+    const occlusionKey = (button) => button.dataset.marker ? `m:${button.dataset.marker}:${button.dataset.subSpotIndex ?? ""}` : button.dataset.area ? `a:${button.dataset.area}` : "";
+    const occlusionState = new Map((this._modelViewer.markerButtons || [])
+      .map(({ button }) => [occlusionKey(button), ["occluded", "occluded-dim"].filter((name) => button.classList.contains(name))])
+      .filter(([key]) => key));
     this._modelViewer.markerButtons = this._build3DMarkerButtons(markerLayer, this._modelViewer.THREE, this._modelViewer.camera);
-    // New buttons start without an occlusion state; check them on the next frame.
+    this._modelViewer.markerButtons.forEach(({ button }) => button.classList.add(...(occlusionState.get(occlusionKey(button)) || [])));
+    // Check the new buttons on the next frame anyway, in case something moved.
     this._modelViewer.occlusionForce = true;
     this._refresh3DZoneOverlay(); // also calls _requestRender()
     this._updateDeviceRowsAfterMarkerChange();
@@ -11442,10 +11449,17 @@ class HomeAssistant3DFloorplan extends HTMLElement {
           opacity: 0.4;
         }
 
-        /* Behind a wall from the current camera angle. */
+        /* Behind a wall from the current camera angle: fade out, then stop catching
+           clicks. visibility waits for the fade to finish before switching. */
+        .model-marker {
+          transition: opacity 220ms ease, visibility 0s linear 0s;
+        }
+
         .model-marker.occluded {
+          opacity: 0;
           visibility: hidden;
           pointer-events: none;
+          transition: opacity 220ms ease, visibility 0s linear 220ms;
         }
 
         .model-marker.occluded-dim {
