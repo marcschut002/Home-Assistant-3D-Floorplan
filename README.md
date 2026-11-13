@@ -232,6 +232,38 @@ not matter. Set
 `show_layer_switcher: false` on the floorplan card to drop its built-in layer buttons
 when a navigation card shows the layers.
 
+## Floorplan Cards
+
+`custom:home-assistant-3d-floorplan-cards` holds other dashboard cards and shows
+them only while the floorplan card shows a chosen floor, layer and/or view. For example,
+show an energy graph next to the model while the energy layer is selected. In the card
+editor, pick the conditions under **Show when** (the choices come from the floorplan
+card) and add cards under **Cards**: a tab per card, and **+** opens the card picker.
+
+```yaml
+type: custom:home-assistant-3d-floorplan-cards
+layers: [energy]
+floors: [ground]
+cards:
+  - type: energy-distribution
+  - type: entity
+    entity: sensor.power_consumption
+```
+
+| Option | Description |
+| --- | --- |
+| `floors` | Floor ids. |
+| `layers` | Layer ids; `all` stands for the **All** button. |
+| `views` | View names; `default` stands for the **Home** view. |
+| `target` | As on the navigation card: only needed with several floorplan cards. |
+| `cards` | The cards to show, stacked vertically. |
+
+An empty condition means any. With several conditions all of them must hold; within
+one condition any of the listed ids will do. A card without conditions always shows.
+While you edit the dashboard the cards always show: faded, with a line saying when
+they are visible. The floorplan state lives in the browser, so each screen follows
+its own floorplan card.
+
 ## Layers
 
 Layers group markers so you can switch between, for example, lighting, climate and

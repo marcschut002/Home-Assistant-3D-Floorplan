@@ -6,12 +6,14 @@ const UI_TEXTS = {
     floorsPlural: "floors", layersPlural: "layers", viewsPlural: "views",
     notFound: "No 3D floorplan card found on this dashboard", withTarget: "with target",
     nothing: (groups) => `Nothing to show: the floorplan has no ${groups} to choose from.`,
+    cardsHidden: "Hidden now, shown with", cardsEmpty: "No cards yet: add them in the card editor.",
   },
   nl: {
     floors: "Verdieping", layers: "Laag", views: "Weergave", all: "Alles", home: "Thuis", choose: "Kies…",
     floorsPlural: "verdiepingen", layersPlural: "lagen", viewsPlural: "weergaven",
     notFound: "Geen 3D floorplan card gevonden op dit dashboard", withTarget: "met target",
     nothing: (groups) => `Niets te tonen: de floorplan heeft geen ${groups} om uit te kiezen.`,
+    cardsHidden: "Nu verborgen, zichtbaar bij", cardsEmpty: "Nog geen kaarten: voeg ze toe in de kaarteditor.",
   },
 };
 
@@ -15562,6 +15564,388 @@ class HomeAssistant3DFloorplanNavEditor extends HTMLElement {
 customElements.define("home-assistant-3d-floorplan-nav", HomeAssistant3DFloorplanNav);
 customElements.define("home-assistant-3d-floorplan-nav-editor", HomeAssistant3DFloorplanNavEditor);
 
+// Other dashboard cards that only show while the floorplan shows a chosen floor, layer and/or view.
+class HomeAssistant3DFloorplanCards extends HTMLElement {
+  static getConfigElement() {
+    return document.createElement("home-assistant-3d-floorplan-cards-editor");
+  }
+
+  static getStubConfig() {
+    return { layers: [], cards: [] };
+  }
+
+  static list(value) {
+    return (Array.isArray(value) ? value : String(value ?? "").split(","))
+      .map((item) => String(item ?? "").trim())
+      .filter((item, index, items) => item && items.indexOf(item) === index);
+  }
+
+  // Each set condition must hold; within a condition any listed id will do.
+  // Layer "all" stands for the All button, view "default" for the Home view.
+  static matches(config, state) {
+    const { floors = [], layers = [], views = [] } = config || {};
+    if (!floors.length && !layers.length && !views.length) return true;
+    if (!state) return false;
+    const holds = (wanted, active) => !wanted.length || wanted.some((id) => id.toLowerCase() === String(active).toLowerCase());
+    return holds(floors, state.activeFloor || "")
+      && holds(layers, state.activeLayer || "all")
+      && holds(views, state.activeView || "default");
+  }
+
+  constructor() {
+    super();
+    this.attachShadow({ mode: "open" });
+    this._state = null;
+    this._preview = false;
+    this._boundState = (event) => this._handleState(event);
+    this._boundVisibility = () => {
+      if (!document.hidden) this._requestState();
+    };
+  }
+
+  setConfig(config) {
+    if (config?.cards !== undefined && !Array.isArray(config.cards)) throw new Error("cards must be a list of cards");
+    const list = HomeAssistant3DFloorplanCards.list;
+    const previous = this._config;
+    this._config = {
+      ...config,
+      target: String(config?.target || "").trim(),
+      floors: list(config?.floors),
+      layers: list(config?.layers),
+      views: list(config?.views),
+      cards: config?.cards || [],
+    };
+    if (this._state && this._config.target && this._state.id.toLowerCase() !== this._config.target.toLowerCase()) this._state = null;
+    const cardsKey = JSON.stringify([this._config.cards, this._config.title || ""]);
+    if (cardsKey !== this._cardsKey) {
+      this._cardsKey = cardsKey;
+      this._buildCards();
+    }
+    this._render();
+    if (!previous || previous.target !== this._config.target) this._requestState();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this._stack) this._stack.hass = hass;
+  }
+
+  // Set by Home Assistant while the dashboard or this card is being edited: then the cards always show.
+  set preview(value) {
+    this._preview = Boolean(value);
+    if (this._stack) this._stack.preview = this._preview;
+    this._render();
+  }
+
+  get preview() {
+    return this._preview;
+  }
+
+  connectedCallback() {
+    window.addEventListener("home-assistant-3d-floorplan-state", this._boundState);
+    document.addEventListener("visibilitychange", this._boundVisibility);
+    this._requestState();
+    window.clearInterval(this._retryTimer);
+    this._retryTimer = window.setInterval(() => {
+      if (this._state) window.clearInterval(this._retryTimer);
+      else this._requestState();
+    }, 1000);
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener("home-assistant-3d-floorplan-state", this._boundState);
+    document.removeEventListener("visibilitychange", this._boundVisibility);
+    window.clearInterval(this._retryTimer);
+  }
+
+  getCardSize() {
+    return this._stack?.getCardSize ? this._stack.getCardSize() : 1;
+  }
+
+  getGridOptions() {
+    return { columns: 12, rows: "auto", min_columns: 3 };
+  }
+
+  _requestState() {
+    if (this.isConnected) window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-nav-request"));
+  }
+
+  _handleState(event) {
+    const state = event.detail;
+    if (!state?.id || !this._config) return;
+    const target = this._config.target.toLowerCase();
+    if (target ? state.id.toLowerCase() !== target : this._state && this._state.id !== state.id) return;
+    this._state = state;
+    this._update();
+  }
+
+  // The cards go into one vertical stack, built by Home Assistant's own card helpers.
+  async _buildCards() {
+    const token = (this._buildToken = (this._buildToken || 0) + 1);
+    const { cards, title } = this._config;
+    let stack = null;
+    if (cards.length) {
+      const helpers = await window.loadCardHelpers?.();
+      if (token !== this._buildToken) return;
+      stack = helpers?.createCardElement({ type: "vertical-stack", ...(title ? { title } : {}), cards }) || null;
+      if (stack) {
+        stack.hass = this._hass;
+        stack.preview = this._preview;
+        // A stack whose cards finish loading later asks to be built again.
+        stack.addEventListener("ll-rebuild", (event) => {
+          event.stopPropagation();
+          this._cardsKey = "";
+          this._buildCards();
+        });
+      }
+    }
+    if (token !== this._buildToken) return;
+    this._stack = stack;
+    this._render();
+  }
+
+  _render() {
+    if (!this.shadowRoot || !this._config) return;
+    if (!this._cardsElement) {
+      this.shadowRoot.innerHTML = `
+        <style>
+          :host { display: block; }
+          .notice {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 6px;
+            color: var(--secondary-text-color);
+            font-size: 12px;
+            --mdc-icon-size: 16px;
+          }
+          .notice[hidden] { display: none; }
+          .cards.dimmed { opacity: 0.5; }
+          .empty { padding: 16px; color: var(--secondary-text-color); font-size: 14px; }
+        </style>
+        <div class="notice" hidden><ha-icon icon="mdi:eye-off-outline"></ha-icon><span></span></div>
+        <div class="cards"></div>
+      `;
+      this._noticeElement = this.shadowRoot.querySelector(".notice");
+      this._cardsElement = this.shadowRoot.querySelector(".cards");
+    }
+    let content = this._stack;
+    if (!content && this._preview) {
+      content = document.createElement("ha-card");
+      content.innerHTML = `<div class="empty">${this._escape(uiTexts(this._hass).cardsEmpty)}</div>`;
+    }
+    if (this._cardsElement.firstElementChild !== content) this._cardsElement.replaceChildren(...(content ? [content] : []));
+    this._update();
+  }
+
+  _update() {
+    if (!this._config || !this._cardsElement) return;
+    const visible = HomeAssistant3DFloorplanCards.matches(this._config, this._state);
+    const shown = visible || this._preview;
+    if (this.hidden !== !shown) {
+      this.hidden = !shown;
+      this.style.display = shown ? "" : "none";
+      this.dispatchEvent(new CustomEvent("card-visibility-changed", { detail: { value: shown }, bubbles: true, composed: true }));
+    }
+    const explain = this._preview && !visible;
+    this._cardsElement.classList.toggle("dimmed", explain);
+    this._noticeElement.hidden = !explain;
+    if (explain) this._noticeElement.querySelector("span").textContent = this._conditionText();
+  }
+
+  // "Hidden now, shown with Layer: Energy · Floor: Ground floor", with the floorplan's own names.
+  _conditionText() {
+    const texts = uiTexts(this._hass);
+    if (!this._state) return `${texts.notFound}${this._config.target ? ` ${texts.withTarget} "${this._config.target}"` : ""}.`;
+    const nameOf = (items, id, fallback) => items?.find((item) => item.id === id)?.name || fallback || id;
+    const parts = [
+      ["floors", this._config.floors.map((id) => nameOf(this._state.floors, id))],
+      ["layers", this._config.layers.map((id) => (id.toLowerCase() === "all" ? texts.all : nameOf(this._state.layers, id)))],
+      ["views", this._config.views.map((id) => nameOf(this._state.views, id, id === "default" ? texts.home : id))],
+    ].filter(([, names]) => names.length);
+    return `${texts.cardsHidden} ${parts.map(([key, names]) => `${texts[key]}: ${names.join(", ")}`).join(" · ")}`;
+  }
+
+  _escape(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+}
+
+// Conditions on top, then Home Assistant's own stack editor: a tab per card, + opens the card picker.
+class HomeAssistant3DFloorplanCardsEditor extends HTMLElement {
+  constructor() {
+    super();
+    this._state = null;
+    this._boundState = (event) => {
+      if (!event.detail?.id) return;
+      const target = String(this._config?.target || "").trim().toLowerCase();
+      if (target && event.detail.id.toLowerCase() !== target) return;
+      const signature = JSON.stringify(event.detail);
+      if (signature === this._stateSignature) return;
+      this._stateSignature = signature;
+      this._state = event.detail;
+      this._renderForm();
+    };
+  }
+
+  setConfig(config) {
+    this._config = { ...config };
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this._form) this._form.hass = hass;
+    if (this._stackEditor) this._stackEditor.hass = hass;
+  }
+
+  set lovelace(lovelace) {
+    this._lovelace = lovelace;
+    if (this._stackEditor) this._stackEditor.lovelace = lovelace;
+  }
+
+  connectedCallback() {
+    window.addEventListener("home-assistant-3d-floorplan-state", this._boundState);
+    window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-nav-request"));
+  }
+
+  disconnectedCallback() {
+    window.removeEventListener("home-assistant-3d-floorplan-state", this._boundState);
+  }
+
+  _render() {
+    if (!this._form) {
+      this.innerHTML = `
+        <style>
+          .cards-title { display: flex; align-items: center; gap: 8px; margin: 24px 0 8px; font-weight: 500; }
+          .cards-hint { color: var(--secondary-text-color); font-size: 12px; margin: 8px 0 0; }
+        </style>
+        <div class="form"></div>
+        <div class="cards-title"><ha-icon icon="mdi:cards-outline"></ha-icon><span>Cards</span></div>
+        <div class="stack"></div>
+      `;
+      this._form = document.createElement("ha-form");
+      this._form.computeLabel = (schema) => ({
+        conditions: "Show when",
+        floors: "Floors",
+        layers: "Layers (all = the All button)",
+        views: "Views (default = Home, of the active floor)",
+        target: "Target card (storage_key or title, only with several floorplan cards)",
+      })[schema.name] || schema.name;
+      this._form.computeHelper = (schema) => (schema.name === "conditions"
+        ? "Empty means any. With several conditions all must hold; within one condition any choice will do. While editing the dashboard the cards always show."
+        : undefined);
+      this._form.addEventListener("value-changed", (event) => {
+        event.stopPropagation();
+        this._config = { ...this._config, ...event.detail.value };
+        this._fireChanged();
+      });
+      this.querySelector(".form").appendChild(this._form);
+    }
+    this._renderForm();
+    this._ensureStackEditor();
+    this._syncStackEditor();
+  }
+
+  _renderForm() {
+    if (!this._form) return;
+    const state = this._state;
+    const texts = uiTexts(this._hass);
+    const choices = (values, options) => {
+      const known = new Set(options.map((option) => option.value));
+      return [...options, ...values.filter((value) => !known.has(value)).map((value) => ({ value, label: value }))];
+    };
+    const list = HomeAssistant3DFloorplanCards.list;
+    const select = (name, options) => ({
+      name,
+      selector: { select: { multiple: true, custom_value: true, mode: "dropdown", options: choices(list(this._config?.[name]), options) } },
+    });
+    this._form.hass = this._hass;
+    this._form.schema = [
+      {
+        name: "conditions",
+        type: "expandable",
+        flatten: true,
+        expanded: true,
+        icon: "mdi:eye-outline",
+        schema: [
+          select("floors", (state?.floors || []).map((floor) => ({ value: floor.id, label: floor.name || floor.id }))),
+          select("layers", [{ value: "all", label: texts.all }, ...(state?.layers || []).map((layer) => ({ value: layer.id, label: layer.name || layer.id }))]),
+          select("views", (state?.views || []).map((view) => ({ value: view.id, label: view.id === "default" ? view.name || texts.home : view.name || view.id }))),
+          { name: "target", selector: { text: {} } },
+        ],
+      },
+    ];
+    this._form.data = {
+      target: "",
+      ...this._config,
+      floors: list(this._config?.floors),
+      layers: list(this._config?.layers),
+      views: list(this._config?.views),
+    };
+  }
+
+  // hui-stack-card-editor is loaded with the vertical stack card, which the helpers load on demand.
+  async _ensureStackEditor() {
+    if (this._stackEditor || this._loadingStack) return;
+    this._loadingStack = true;
+    try {
+      const helpers = await window.loadCardHelpers?.();
+      if (!customElements.get("hui-vertical-stack-card")) helpers?.createCardElement({ type: "vertical-stack", cards: [] });
+      await customElements.whenDefined("hui-vertical-stack-card");
+      const editor = await customElements.get("hui-vertical-stack-card").getConfigElement();
+      editor.hass = this._hass;
+      editor.lovelace = this._lovelace;
+      editor.addEventListener("config-changed", (event) => {
+        event.stopPropagation();
+        const { cards = [], title } = event.detail?.config || {};
+        const { title: _title, ...rest } = this._config;
+        this._config = { ...rest, ...(title ? { title } : {}), cards };
+        this._fireChanged();
+      });
+      this._stackEditor = editor;
+      this._syncStackEditor();
+      this.querySelector(".stack").appendChild(editor);
+    } catch (error) {
+      this.querySelector(".stack").innerHTML = `<p class="cards-hint">The card list could not be loaded here: add cards under "cards:" in the code editor. (${String(error?.message || error)})</p>`;
+    } finally {
+      this._loadingStack = false;
+    }
+  }
+
+  _syncStackEditor() {
+    if (!this._stackEditor) return;
+    const config = { type: "vertical-stack", ...(this._config.title ? { title: this._config.title } : {}), cards: this._config.cards || [] };
+    const key = JSON.stringify(config);
+    if (key === this._stackKey) return;
+    this._stackKey = key;
+    this._stackEditor.setConfig(config);
+  }
+
+  // A tidy config: empty conditions are left out, cards come last.
+  _fireChanged() {
+    const list = HomeAssistant3DFloorplanCards.list;
+    const { type, target, floors, layers, views, title, cards, ...rest } = this._config;
+    const config = { type, ...rest };
+    if (String(target || "").trim()) config.target = String(target).trim();
+    for (const [key, value] of [["floors", floors], ["layers", layers], ["views", views]]) {
+      if (list(value).length) config[key] = list(value);
+    }
+    if (title) config.title = title;
+    config.cards = cards || [];
+    this._config = config;
+    this._syncStackEditor();
+    this.dispatchEvent(new CustomEvent("config-changed", { detail: { config }, bubbles: true, composed: true }));
+  }
+}
+
+customElements.define("home-assistant-3d-floorplan-cards", HomeAssistant3DFloorplanCards);
+customElements.define("home-assistant-3d-floorplan-cards-editor", HomeAssistant3DFloorplanCardsEditor);
+
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "home-assistant-3d-floorplan",
@@ -15573,4 +15957,8 @@ window.customCards.push({
   name: "Home Assistant 3D Floorplan Navigation",
   description: "Floor, layer and view buttons for a 3D floorplan card on the same dashboard.",
 });
-
+window.customCards.push({
+  type: "home-assistant-3d-floorplan-cards",
+  name: "Home Assistant 3D Floorplan Cards",
+  description: "Cards that only show while the 3D floorplan shows a chosen floor, layer or view.",
+});
