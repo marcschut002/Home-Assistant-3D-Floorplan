@@ -15652,7 +15652,9 @@ class HomeAssistant3DFloorplanCards extends HTMLElement {
     }, 1000);
   }
 
+  // Home Assistant takes a hidden card out of the page: keep listening then, or it could never come back.
   disconnectedCallback() {
+    if (this.hidden) return;
     window.removeEventListener("home-assistant-3d-floorplan-state", this._boundState);
     document.removeEventListener("visibilitychange", this._boundVisibility);
     window.clearInterval(this._retryTimer);
@@ -15667,7 +15669,7 @@ class HomeAssistant3DFloorplanCards extends HTMLElement {
   }
 
   _requestState() {
-    if (this.isConnected) window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-nav-request"));
+    if (this.isConnected || this.hidden) window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-nav-request"));
   }
 
   _handleState(event) {
