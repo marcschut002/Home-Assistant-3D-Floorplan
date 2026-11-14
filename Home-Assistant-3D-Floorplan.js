@@ -22,6 +22,14 @@ function uiTexts(hass) {
   return UI_TEXTS[language] || UI_TEXTS.en;
 }
 
+// Where the card looks for its Three.js bundle first. HACS installs from a branch copy the
+// .js files in the repo root, so the bundle sits next to the card; release installs keep dist/.
+const DEFAULT_THREE_BUNDLE_URLS = [
+  "/hacsfiles/Home-Assistant-3D-Floorplan/three.bundle.min.js",
+  "/hacsfiles/Home-Assistant-3D-Floorplan/dist/three.bundle.min.js",
+  "/local/three.bundle.min.js",
+];
+
 // Edit-only layer filter: markers that belong to no layer.
 const NO_LAYER = "__none__";
 // group_by_area layers add up power readings; other units are not summed.
@@ -192,10 +200,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
         night_opacity: 1,
       },
       three_url: "https://esm.sh/three@0.165.0",
-      three_bundle_urls: [
-        "/hacsfiles/Home-Assistant-3D-Floorplan/dist/three.bundle.min.js",
-        "/local/three.bundle.min.js",
-      ],
+      three_bundle_urls: [...DEFAULT_THREE_BUNDLE_URLS],
       three_bundle_url: "",
       model_performance_profile: "quality",
       model_antialias: null,
@@ -6723,10 +6728,7 @@ class HomeAssistant3DFloorplan extends HTMLElement {
       lines.push(`model_antialias: ${this._config.model_antialias !== false ? "true" : "false"}`);
     }
     const customBundleUrls = this._asList(this._config.three_bundle_urls).filter(
-      (url) => ![
-        "/hacsfiles/Home-Assistant-3D-Floorplan/dist/three.bundle.min.js",
-        "/local/three.bundle.min.js",
-      ].includes(url)
+      (url) => !DEFAULT_THREE_BUNDLE_URLS.includes(url)
     );
     if (customBundleUrls.length) {
       lines.push("three_bundle_urls:");

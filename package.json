@@ -5,7 +5,8 @@
   "main": "Home-Assistant-3D-Floorplan.js",
   "scripts": {
     "build": "node build.js",
-    "build:watch": "node --watch build.js"
+    "build:watch": "node --watch build.js",
+    "test": "node --test"
   },
   "repository": {
     "type": "git",

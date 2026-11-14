@@ -752,9 +752,14 @@ When installed through HACS, the card first loads the bundled Three.js build fro
 
 ```yaml
 three_bundle_urls:
+  - /hacsfiles/Home-Assistant-3D-Floorplan/three.bundle.min.js
   - /hacsfiles/Home-Assistant-3D-Floorplan/dist/three.bundle.min.js
   - /local/three.bundle.min.js
 ```
+
+The bundle `three.bundle.min.js` sits in the repository root, next to the card, so a HACS
+install from a branch brings it along. To move to another Three.js version, change
+`three` in `package.json`, run `npm install && npm run build` and commit the new bundle.
 
 If those bundle paths are unavailable, the card falls back to the external CDN `esm.sh`:
 
@@ -766,7 +771,7 @@ The bundled HACS path avoids remote-access and Companion App issues caused by bl
 
 ### Making it fully offline (recommended)
 
-The repository includes a pre-built bundle at `dist/three.bundle.min.js`. Copy it to your Home Assistant `www` folder:
+The repository includes a pre-built bundle at `three.bundle.min.js`. Copy it to your Home Assistant `www` folder:
 
 ```
 /config/www/three.bundle.min.js
