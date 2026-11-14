@@ -15624,7 +15624,8 @@ class HomeAssistant3DFloorplanCards extends HTMLElement {
       this._buildCards();
     }
     this._render();
-    if (!previous || previous.target !== this._config.target) this._requestState();
+    if (!this._listening) this._listen();
+    else if (!previous || previous.target !== this._config.target) this._requestState();
   }
 
   set hass(hass) {
@@ -15643,7 +15644,21 @@ class HomeAssistant3DFloorplanCards extends HTMLElement {
     return this._preview;
   }
 
+  // Listen from the first config on, not from connectedCallback: Home Assistant only puts a card
+  // on the page while it is visible, and this card starts hidden until the floorplan answers.
   connectedCallback() {
+    this._listen();
+  }
+
+  // Home Assistant takes a hidden card out of the page: keep listening then, or it could never come back.
+  disconnectedCallback() {
+    if (this.hidden) return;
+    this._unlisten();
+  }
+
+  _listen() {
+    if (this._listening) return;
+    this._listening = true;
     window.addEventListener("home-assistant-3d-floorplan-state", this._boundState);
     document.addEventListener("visibilitychange", this._boundVisibility);
     this._requestState();
@@ -15654,9 +15669,8 @@ class HomeAssistant3DFloorplanCards extends HTMLElement {
     }, 1000);
   }
 
-  // Home Assistant takes a hidden card out of the page: keep listening then, or it could never come back.
-  disconnectedCallback() {
-    if (this.hidden) return;
+  _unlisten() {
+    this._listening = false;
     window.removeEventListener("home-assistant-3d-floorplan-state", this._boundState);
     document.removeEventListener("visibilitychange", this._boundVisibility);
     window.clearInterval(this._retryTimer);
@@ -15671,7 +15685,7 @@ class HomeAssistant3DFloorplanCards extends HTMLElement {
   }
 
   _requestState() {
-    if (this.isConnected || this.hidden) window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-nav-request"));
+    if (this._listening) window.dispatchEvent(new CustomEvent("home-assistant-3d-floorplan-nav-request"));
   }
 
   _handleState(event) {

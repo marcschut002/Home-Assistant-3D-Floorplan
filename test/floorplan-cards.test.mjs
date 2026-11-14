@@ -69,3 +69,28 @@ test("lists accept YAML lists and comma separated text", () => {
   assert.deepEqual(Cards.list(["energy"]), ["energy"]);
   assert.deepEqual(Cards.list(undefined), []);
 });
+
+// Home Assistant never attaches a card that starts hidden, so the card must
+// listen for the floorplan from setConfig on, not only once it is connected.
+test("a card that starts hidden still shows once the floorplan selects its layer", () => {
+  const listeners = new Map();
+  const saved = { add: window.addEventListener, setInterval: window.setInterval, CustomEvent: globalThis.CustomEvent };
+  window.addEventListener = (name, handler) => listeners.set(name, handler);
+  window.setInterval = () => 0;
+  window.clearInterval = () => {};
+  globalThis.CustomEvent ??= class { constructor(type, init) { this.type = type; this.detail = init?.detail; } };
+  document.addEventListener = () => {};
+  try {
+    const card = new Cards();
+    card.style = {};
+    card._render = () => { card._cardsElement = { classList: { toggle() {} } }; card._noticeElement = { hidden: true }; card._update(); };
+    card.setConfig({ layers: ["Energy"], cards: [] });
+    assert.equal(card.hidden, true);
+    assert.ok(listeners.has("home-assistant-3d-floorplan-state"), "listens before it is connected");
+    listeners.get("home-assistant-3d-floorplan-state")({ detail: { ...state, activeLayer: "energy" } });
+    assert.equal(card.hidden, false);
+  } finally {
+    window.addEventListener = saved.add;
+    window.setInterval = saved.setInterval;
+  }
+});
