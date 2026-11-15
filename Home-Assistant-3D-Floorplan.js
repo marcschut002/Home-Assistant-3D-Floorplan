@@ -3880,8 +3880,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
     this._pendingRequestedView = true;
     const layerId = this._requestedLayerId();
     if (layerId.toLowerCase() === "all" || this._layerById(layerId)) this._setActiveLayer(layerId);
-    const floorId = this._requestedModelFloorId();
-    if (floorId && floorId !== this._activeFloorId && this._floors.some((floor) => floor.id === floorId)) {
+    const requestedFloor = this._requestedModelFloorId().toLowerCase();
+    const floorId = requestedFloor && this._floors.find((floor) => floor.id.toLowerCase() === requestedFloor)?.id;
+    if (floorId && floorId !== this._activeFloorId) {
       this._setActiveFloor(floorId);
       return true;
     }
@@ -3889,12 +3890,15 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   }
 
   _applyRequestedModelView() {
-    const name = this._requestedModelViewName();
-    if (!name) {
+    const requested = this._requestedModelViewName();
+    if (!requested) {
       this._activeRequestedModelView = "";
       return false;
     }
-    const view = this._modelViews?.[this._activeFloorId || "default"]?.[name];
+    // View names compare without case, so #hafp_view=carport finds the view "Carport".
+    const views = this._modelViews?.[this._activeFloorId || "default"] || {};
+    const name = Object.keys(views).find((key) => key.toLowerCase() === requested.toLowerCase()) || requested;
+    const view = views[name];
     if (!view || !this._modelViewer?.camera || !this._modelViewer?.controls) return false;
     this._pendingRequestedView = false;
     this._activeRequestedModelView = name;
@@ -7705,6 +7709,9 @@ class HomeAssistant3DFloorplan extends HTMLElement {
   _navigate(path) {
     const target = this._normalizeNavigationPath(path);
     if (!target) return false;
+    // A link is normally applied once, but a tap on a marker always applies it, also when
+    // the address bar already holds the same link from an earlier tap.
+    if (target.includes("hafp_")) this._handledNavigationKey = null;
     if (target.startsWith("#")) {
       // Hash targets drive pop-up cards (e.g. Bubble Card) without a route change.
       window.location.hash = target.slice(1);
@@ -15599,6 +15606,8 @@ class HomeAssistant3DFloorplanCards extends HTMLElement {
     this.attachShadow({ mode: "open" });
     this._state = null;
     this._preview = false;
+    // Tells Home Assistant's hui-card to keep this card on the page while it is hidden.
+    this.connectedWhileHidden = true;
     this._boundState = (event) => this._handleState(event);
     this._boundVisibility = () => {
       if (!document.hidden) this._requestState();
